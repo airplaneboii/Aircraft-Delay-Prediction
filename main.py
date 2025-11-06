@@ -2,6 +2,7 @@ from src.config import get_args
 from src.data_loader import load_data
 from src.graph.base import BaseGraph
 from src.models.dummymodel import DummyModel
+from src.models.rgcnmodel import RGCN
 from src.train import train
 from src.test import test
 from src.utils import ensure_dir, move_graph_to_device
@@ -9,7 +10,7 @@ import torch
 
 def main():
     args = get_args()
-    df = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type)
+    df = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type, development=args.development)
     ensure_dir(args.graph_dir)
     ensure_dir(args.model_dir)
 
@@ -33,6 +34,18 @@ def main():
             in_channels=graph["airport"].x.shape[1],
             hidden_channels=64,
             out_channels=out_channels,
+        ).to(device)
+    if args.model_type == "rgcnmodel":
+        # Metadata and input dims for heterogeneous RGCN
+        out_channels = 2 if args.prediction_type == "classification" else 1
+        model = RGCN(
+            in_channels=graph["airport"].x.shape[1],
+            hidden_channels=64,
+            out_channels=out_channels,
+            num_relations=len(graph.edge_types),
+            num_bases=None,
+            num_layers=2,
+            dropout=0.2
         ).to(device)
     else:
         raise ValueError("Unsupported model type.")
