@@ -9,7 +9,7 @@ import torch
 
 def main():
     args = get_args()
-    df = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type)
+    df = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type, development=args.development)
     ensure_dir(args.graph_dir)
     ensure_dir(args.model_dir)
 

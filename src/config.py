@@ -1,11 +1,22 @@
 import argparse
 import os
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def get_args():
     parser = argparse.ArgumentParser(description="Flight Delay Prediction Configuration")
 
     # General
-    parser.add_argument("--mode", type=str, choices=["develop", "train", "test"], default="develop", help="Mode of operation")
+    parser.add_argument("--mode", type=str, choices=["train", "test"], default="train", help="Mode of operation")
+    parser.add_argument("--development", type=str2bool, default=True, help="Development mode with smaller dataset ONLY for quick code testing")
     parser.add_argument("--graph_type", type=str, choices=["base"], default="base", help="Type of graph to build")             # TODO: Add graph types when implemented
     parser.add_argument("--model_type", type=str, choices=["dummymodel"], default="dummymodel", help="Type of model to use")   # TODO: Add models when implemented
     parser.add_argument("--data_path", type=str, default="data/dataset.csv", help="Path to the dataset file")
