@@ -24,10 +24,10 @@ def train(
         optimizer.zero_grad()
 
         # Forward pass
-        out = model(graph["airport"].x, graph["airport", "flies_to", "airport"].edge_index)
+        out = model(graph.x_dict, graph.edge_index_dict)
         if args.prediction_type == "regression":
-            labels = graph["airport"].y.float().squeeze(-1)
-            out = out.squeeze(-1)  # Ensure output shape matches labels
+            labels = graph["flight"].y.squeeze()
+            out = out["flight"].y.squeeze()  # Ensure output shape matches labels
         else:
             labels = graph["airport"].y.long()
 

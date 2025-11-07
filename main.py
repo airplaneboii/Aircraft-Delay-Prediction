@@ -36,7 +36,6 @@ def main():
             out_channels=out_channels,
         ).to(device)
     if args.model_type == "rgcnmodel":
-        # Metadata and input dims for heterogeneous RGCN
         out_channels = 2 if args.prediction_type == "classification" else 1
         model = RGCN(
             in_channels=graph["airport"].x.shape[1],
