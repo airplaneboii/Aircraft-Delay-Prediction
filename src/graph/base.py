@@ -7,7 +7,6 @@ class BaseGraph:
         self.args = args
 
     def build(self):
-        print("NOTE: This is only a basic graph. Implement the actual graph!")
         data = HeteroData()
 
         # Nodes (Airports, Aircrafts, Airlines, Causes, Flights)
@@ -21,6 +20,7 @@ class BaseGraph:
         airline_map = {a: i for i, a in enumerate(airlines)}
         cause_map = {c: i for i, c in enumerate(causes)}
 
+        #TODO: add real features
         data["airport"].x = torch.randn(len(airports), 16)
         data["aircraft"].x = torch.randn(len(aircrafts), 16)
         data["airline"].x = torch.randn(len(airlines), 16)
@@ -52,9 +52,9 @@ class BaseGraph:
         # Edge 5: flight 1 performed by aircraft that later performs flight 2 (temporal link)
         next_src = []
         next_dst = []
-        df_sorted = self.df.sort_values(["TAIL_NUM", "FL_DATE", "CRS_DEP_TIME"]).reset_index()
+        df_sorted = self.df.sort_values(["TAIL_NUM", "FL_DATE", "CRS_DEP_TIME"]).reset_index(drop=True)
         for tail, group in df_sorted.groupby("TAIL_NUM"):
-            idx_list = group["index"].tolist()
+            idx_list = group.index.tolist()
             # link consecutive flights
             for i in range(len(idx_list) - 1):
                 next_src.append(idx_list[i])
@@ -73,7 +73,9 @@ class BaseGraph:
         src = []
         dst = []
 
-        for i, row in self.df.iterrows():
+        df_reset = self.df.reset_index(drop=True)
+
+        for i, row in df_reset.iterrows():
             for delay_col, cause in delay_causes.items():
                 if row[delay_col] > 0:
                     src.append(i)
@@ -91,7 +93,7 @@ class BaseGraph:
 
         c_src = []
         c_dst = []
-        for i, row in self.df.iterrows():
+        for i, row in df_reset.iterrows():
             if row["CANCELLED"] == 1 and row["CANCELLATION_CODE"] in cancel_causes:
                 cause = cancel_causes[row["CANCELLATION_CODE"]]
                 c_src.append(i)

@@ -1,57 +1,53 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GCNConv, RGCNConv, HeteroConv
+from torch_geometric.nn import GCNConv, RGCNConv, HeteroConv, SAGEConv
 import torch.nn.functional as F
 
 
 # NOT FINAL IMPLEMENTATION
 # need to adapt to graph structure and data, then test and debug
-
-
+# currently not a true rgcn, just a GNN for heterogeneous graphs
 
 class RGCN(nn.Module):
-    def __init__(self, in_channels, hidden_channels=64, out_channels=1, num_relations=1, num_bases=None, num_layers=2, dropout=0.2):
-        """
+    def __init__(self, metadata, in_channels_dict, hidden_channels=64, out_channels=1, num_layers=2, dropout=0.2):
 
-        Args:
-            in_channels: Number of input features per node
-            hidden_channels: Hidden embedding dimension
-            out_channels: Output dimension (1 for regression, >=2 for classification)
-            num_relations: Number of edge types
-            num_bases: Number of bases for RGCNConv (optional)
-            num_layers: Number of RGCN layers
-            dropout: Dropout probability
-        """
         super().__init__()
+        self.node_types, self.edge_types = metadata
+        self.hidden_channels = hidden_channels
+        self.out_channels = out_channels
         self.num_layers = num_layers
         self.dropout = dropout
 
-        # First layer
+        #Encode to a common hidden dim
+        self.encoders = nn.ModuleDict({
+            nodeType: nn.Linear(in_channels_dict[nodeType], hidden_channels)
+            for nodeType in self.node_types
+        })
+
+        # Message passing layers
         self.convs = nn.ModuleList()
-        self.convs.append(RGCNConv(in_channels, hidden_channels, num_relations, num_bases=num_bases))
+        for i in range(num_layers):
+            conv = HeteroConv(
+                {
+                    edgeType: SAGEConv(hidden_channels, hidden_channels)
+                    for edgeType in self.edge_types
+                },
+                aggr="sum"
+            )
+            self.convs.append(conv)
 
-        # Hidden layers
-        for _ in range(num_layers - 1):
-            self.convs.append(RGCNConv(hidden_channels, hidden_channels, num_relations, num_bases=num_bases))
 
-        # Output layer
-        self.lin = nn.Linear(hidden_channels, out_channels)
+        self.readout = nn.Linear(hidden_channels, out_channels)
 
-    def forward(self, x, edge_index, edge_type=None):
-        """
-        Forward pass.
-
-        Args:
-            x: Node features [num_nodes, in_channels]
-            edge_index: Edge index [2, num_edges]
-            edge_type: Tensor of edge types [num_edges] (optional, default all zeros)
-        """
-        if edge_type is None:
-            edge_type = torch.zeros(edge_index.size(1), dtype=torch.long, device=x.device)
+    def forward(self, x_dict, edge_index_dict):
+        x_dict = {
+            nodeType: F.relu(self.encoders[nodeType](x))
+            for nodeType, x in x_dict.items()
+        }
 
         for conv in self.convs:
-            x = F.relu(conv(x, edge_index, edge_type))
-            x = F.dropout(x, p=self.dropout, training=self.training)
-
-        out = self.lin(x)
-        return out
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {nodeType: F.relu(x) for nodeType, x in x_dict.items()}
+            x_dict = {nodeType: F.dropout(x, p=self.dropout, training=self.training) for nodeType, x in x_dict.items()}
+        
+        return self.readout(x_dict["flight"])

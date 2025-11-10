@@ -26,19 +26,20 @@ def train(
         # Forward pass
         out = model(graph.x_dict, graph.edge_index_dict)
         if args.prediction_type == "regression":
-            labels = graph["flight"].y.squeeze()
-            out = out["flight"].y.squeeze()  # Ensure output shape matches labels
+            labels = graph["flight"].y.squeeze(-1).to(out.device)
+            preds = out.squeeze(-1) 
         else:
-            labels = graph["airport"].y.long()
+            labels = graph["flight"].y.long().to(out.device)
+            preds = out 
 
         # Compute loss
-        loss = criterion(out, labels)
+        loss = criterion(preds, labels)
         loss.backward()
         optimizer.step()
 
         # Compute metrics for monitoring
         if args.prediction_type == "regression":
-            metrics_results = regression_metrics(labels, out.squeeze())
+            metrics_results = regression_metrics(labels, preds)
             metrics_str = f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, RMSE: {metrics_results['RMSE']:.4f}"
         else:
             metrics_results = classification_metrics(labels, torch.argmax(out, dim=1))

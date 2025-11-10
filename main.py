@@ -3,6 +3,7 @@ from src.data_loader import load_data
 from src.graph.base import BaseGraph
 from src.models.dummymodel import DummyModel
 from src.models.rgcnmodel import RGCN
+from src.models.hgtmodel import HGT
 from src.train import train
 from src.test import test
 from src.utils import ensure_dir, move_graph_to_device
@@ -26,6 +27,8 @@ def main():
     print(f"Using device: {device}")
 
     graph = move_graph_to_device(graph, device)
+    metadata = graph.metadata() #metadata[0] are node types, metadata[1] are edge types
+    in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
 
     # Select model
     if args.model_type == "dummymodel":
@@ -35,15 +38,26 @@ def main():
             hidden_channels=64,
             out_channels=out_channels,
         ).to(device)
-    if args.model_type == "rgcnmodel":
+    elif args.model_type == "rgcnmodel":
         out_channels = 2 if args.prediction_type == "classification" else 1
         model = RGCN(
-            in_channels=graph["airport"].x.shape[1],
+            metadata=metadata,
+            in_channels_dict=in_channels_dict,
             hidden_channels=64,
             out_channels=out_channels,
-            num_relations=len(graph.edge_types),
-            num_bases=None,
             num_layers=2,
+            dropout=0.2,
+        ).to(device)
+    elif args.model_type == "hgtmodel":
+        print("Using model hgt")
+        out_channels = 2 if args.prediction_type == "classification" else 1
+        model = HGT(
+            metadata=metadata,
+            in_channels_dict = in_channels_dict,
+            hidden_channels=64,
+            out_channels=out_channels,
+            num_layers=2,
+            num_heads=2,
             dropout=0.2
         ).to(device)
     else:
