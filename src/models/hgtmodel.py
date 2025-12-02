@@ -9,6 +9,7 @@ class HGT(nn.Module):
         super().__init__()
         self.metadata = metadata
         self.node_types, self.edge_types = metadata
+        self.dropout = nn.Dropout(dropout)
 
         # Convert all node types to same size embeddings
         self.in_proj = nn.ModuleDict()
@@ -19,6 +20,11 @@ class HGT(nn.Module):
                 nn.ReLU(),
                 nn.Dropout(dropout),
             )
+        
+        # Layer normalization for each node type
+        self.norms = nn.ModuleDict({
+            nodeType: nn.LayerNorm(hidden_channels) for nodeType in self.node_types
+        })
 
         # HGT layers
         self.convs = nn.ModuleList()
@@ -32,8 +38,6 @@ class HGT(nn.Module):
                 )
             )
 
-        self.dropout = nn.Dropout(dropout)
-
         # Final MLP head for flight nodes (regression):
         self.flight_head = nn.Sequential(
             nn.Linear(hidden_channels, hidden_channels),
@@ -44,13 +48,26 @@ class HGT(nn.Module):
 
     def forward(self, x_dict, edge_index_dict):
         # Project each node type to hidden space
-        x_dict = {ntype: self.in_proj[ntype](x) for ntype, x in x_dict.items()}
+        x_dict = {nodeType: self.in_proj[nodeType](x) for nodeType, x in x_dict.items()}
 
         # HGT propagation
         for conv in self.convs:
-            x_dict = conv(x_dict, edge_index_dict)
-            x_dict = {k: F.relu(v) for k, v in x_dict.items()}
-            x_dict = {k: self.dropout(v) for k, v in x_dict.items()}
+            out_dict = conv(x_dict, edge_index_dict)
+            x_dict_new = {}
 
+            for nodeType in x_dict:
+                out = out_dict[nodeType]
+                if out is None:
+                    h = x_dict[nodeType]
+                else:
+                    h = x_dict[nodeType] + out
+                h = self.norms[nodeType](h)
+                h = F.relu(h)
+                h = self.dropout(h)
+                x_dict_new[nodeType] = h
+
+            x_dict = x_dict_new
+       
+        # Final prediction for flight nodes
         flight_out = self.flight_head(x_dict["flight"]).squeeze(-1)
         return flight_out

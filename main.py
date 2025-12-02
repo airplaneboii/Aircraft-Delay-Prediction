@@ -32,6 +32,7 @@ def main():
 
     # Select model
     if args.model_type == "dummymodel":
+        print("Using model: dummy")
         out_channels = 2 if args.prediction_type == "classification" else 1
         model = DummyModel(
             in_channels=graph["airport"].x.shape[1],
@@ -39,6 +40,7 @@ def main():
             out_channels=out_channels,
         ).to(device)
     elif args.model_type == "rgcnmodel":
+        print("Using model: rgcn")
         out_channels = 2 if args.prediction_type == "classification" else 1
         model = RGCN(
             metadata=metadata,
@@ -49,7 +51,7 @@ def main():
             dropout=0.2,
         ).to(device)
     elif args.model_type == "hgtmodel":
-        print("Using model hgt")
+        print("Using model: hgt")
         out_channels = 2 if args.prediction_type == "classification" else 1
         model = HGT(
             metadata=metadata,

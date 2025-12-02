@@ -5,8 +5,7 @@ import torch.nn.functional as F
 
 
 # NOT FINAL IMPLEMENTATION
-# need to adapt to graph structure and data, then test and debug
-# currently not a true rgcn, just a GNN for heterogeneous graphs
+# currently not a true rgcn, but a GNN for heterogeneous graphs
 
 class RGCN(nn.Module):
     def __init__(self, metadata, in_channels_dict, hidden_channels=64, out_channels=1, num_layers=2, dropout=0.2):

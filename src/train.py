@@ -37,6 +37,10 @@ def train(
         loss.backward()
         optimizer.step()
 
+        print("NaNs in labels:", torch.isnan(labels).sum().item())
+        print("NaNs in preds: ", torch.isnan(preds).sum().item())
+
+
         # Compute metrics for monitoring
         if args.prediction_type == "regression":
             metrics_results = regression_metrics(labels, preds)
