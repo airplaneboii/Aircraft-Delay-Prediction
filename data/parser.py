@@ -56,15 +56,18 @@ def prepare_post_payload(aspnet_fields, year, month, geography, data_fields, sou
     mo = soup.find("select", id=re.compile("cboPeriod$")) or soup.find("select", {"name": re.compile("cboPeriod$")})
     payload[mo["name"] if mo else "ctl00$ContentPlaceHolder1$cboPeriod"] = str(month)
 
+    # ALTERNATIVE: If this breaks again I can rewrite it so I don't bother with checking available checkboxes anymore 
+    # and just toss the raw values into the payload, in which case it's not protected from inputting a non-existent value but we wouldn't do that so it'd be fine
+    checkboxes = soup.find_all("input", {"type": "checkbox"})
     # Initialize all checkboxes to off
-    for cb in soup.find_all("input", {"type": "checkbox"}):
+    for cb in checkboxes:
         if cb.get("name"):
             payload[cb["name"]] = ""
 
     # Turn on requested data fields
     for short in data_fields:
-        for cb in soup.find_all("input", {"type": "checkbox"}):
-            if short.lower() in cb.get("name", "").lower():
+        for cb in checkboxes:
+            if short.lower() == cb.get("name", "").lower():
                 payload[cb["name"]] = "on"
                 break
 

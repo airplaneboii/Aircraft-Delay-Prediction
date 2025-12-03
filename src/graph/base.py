@@ -23,7 +23,7 @@ class BaseGraph:
         # Nodes (Airports, Aircrafts, Airlines, Causes, Flights)
         airports = sorted(set(self.df["ORIGIN"]).union(set(self.df["DEST"])))
         aircrafts = sorted(self.df["TAIL_NUM"].unique())
-        airlines = sorted(self.df["OP_UNIQUE_CARRIER"].unique())
+        airlines = sorted(self.df["OP_UNIQUE_CARRIER"].unique()) # ALTERNATIVE: parse unique values from lookup tables instead
         causes = ["CARRIER", "WEATHER", "NAS", "SECURITY", "LATE_AIRCRAFT"]
 
         airport_map = {a: i for i, a in enumerate(airports)}

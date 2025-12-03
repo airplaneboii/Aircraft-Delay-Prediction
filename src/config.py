@@ -20,7 +20,7 @@ def get_args():
     parser.add_argument("--graph_type", type=str, choices=["base"], default="base", help="Type of graph to build")             # TODO: Add graph types when implemented
     #parser.add_argument("--model_type", type=str, choices=["dummymodel"], default="dummymodel", help="Type of model to use")   # TODO: Add models when implemented
     parser.add_argument("--model_type", type=str, choices=["rgcnmodel, hgtmodel"], default="hgtmodel", help="Type of model to use")
-    parser.add_argument("--data_path", type=str, default="data/dataset.csv", help="Path to the dataset file")
+    parser.add_argument("--data_path", type=str, default="data/datasets/DATASET.csv", help="Path to the dataset file")
     parser.add_argument("--graph_dir", type=str, default="src/graph/", help="Directory to save or load graphs")
     parser.add_argument("--model_dir", type=str, default="src/models/", help="Directory to save or load models")
 

@@ -1,5 +1,4 @@
-data/dataset.csv
-/src/__pycache__
-/src/graph/__pycache__
-/src/models/__pycache__
+data/datasets
+data/unzipped
+__pycache__/
 *.pt
