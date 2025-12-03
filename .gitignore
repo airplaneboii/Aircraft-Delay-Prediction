@@ -2,3 +2,4 @@ data/datasets
 data/unzipped
 __pycache__/
 *.pt
+venv

@@ -4,23 +4,30 @@ Group project for MLG course 2025.
 This is still work in progress.
 
 ---
+
+## Requirements
+Python 3.10 - 3.13 is recommended. The operating system shouldn't matter. 
+You can clone the repository with git or simply download the zip and unzip it.
+While you can technically run the models on the CPU, it's best to use a GPU.
+Currently only NVIDIA GPUs are supported. While pytorch already supports AMD GPUs on Linux, PyG does not (although this might change in the future). 
+In the meantime you can use a custom build found here: https://github.com/Looong01/pyg-rocm-build, though in that case you'll need to install everything manually or tweak the `setup_env.py` script.
+
 ## Setting up the environment
 Clone the repository:
 ```bash
 git clone https://github.com/airplaneboii/Aircraft-Delay-Prediction.git
 ```
-It is recommended to use a python virtual environment (some operating systems don't even support global python environments anymore).
+It's recommended to use a python virtual environment (some operating systems don't even support global python environments anymore).
+We have a script that will create it automatically and install all needed packages, simply run:
 ```bash
-python -m venv /path/to/new/virtual/environment
+python setup_env.py 
 ```
-Depending on your OS, activating the environment may be different.
-Follow the instructions here: https://docs.python.org/3/library/venv.html#how-venvs-work
+There are some pretty large packages so this could take a while.
 
-Then install all required packages using:
-```bash
-pip install -r requirements.txt
-```
-There are some pretty large packages here so this could take a while.
+To use a custom directory name, torch version or CUDA version, you can set them through command line arguments. See `python setup_env.py -h`.
+
+Depending on your OS, activating the environment may be different. The script will tell you how to do it, 
+but for more details you can follow the instructions here: https://docs.python.org/3/library/venv.html#how-venvs-work
 
 ## Fetching data
 Since we can only download one month of data at a time from Transtats,
