@@ -1,13 +1,13 @@
-import requests
-from bs4 import BeautifulSoup
-import urllib.parse
 import os
 import re
 import time
+import argparse
+import requests
+import urllib.parse
+from bs4 import BeautifulSoup
 from tqdm import tqdm, trange
 from colorama import Fore, Style, init
 from datetime import datetime, timedelta
-import argparse
 from splitter import split_file_to_list, format_list
 
 # Initialize colorama (needed on Windows)
@@ -16,15 +16,15 @@ init(autoreset=True)
 def fetch_initial_page(base_url, query_params):
     """Stage 1: Perform the initial GET request to the TranStats page."""
     full_get_url = f"{base_url}?{urllib.parse.urlencode(query_params)}"
-    print(f"{Fore.CYAN}➜ Performing initial GET request to: {full_get_url}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}Performing initial GET request to: {full_get_url}{Style.RESET_ALL}")
     try:
         session = requests.Session()
         response = session.get(full_get_url)
         response.raise_for_status()
-        print(f"{Fore.GREEN}✔ Initial GET request successful{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}Initial GET request successful{Style.RESET_ALL}")
         return BeautifulSoup(response.text, "html.parser"), session, full_get_url
     except requests.exceptions.RequestException as e:
-        print(f"{Fore.RED}✖ Error during initial GET request: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error during initial GET request: {e}{Style.RESET_ALL}")
         return None, None, None
 
 def extract_aspnet_state_fields(soup):
@@ -37,7 +37,7 @@ def extract_aspnet_state_fields(soup):
     for name in field_names:
         tag = soup.find("input", {"id": name}) or soup.find("input", {"name": name})
         aspnet_fields[name] = tag.get("value", "") if tag else ""
-    print(f"{Fore.GREEN}✔ Extracted ASP.NET state fields{Style.RESET_ALL}")
+    print(f"{Fore.GREEN}Extracted ASP.NET state fields{Style.RESET_ALL}")
     return aspnet_fields
 
 def prepare_post_payload(aspnet_fields, year, month, geography, data_fields, soup):
@@ -75,8 +75,8 @@ def prepare_post_payload(aspnet_fields, year, month, geography, data_fields, sou
     btn = soup.find("input", {"type": "submit", "id": re.compile("btnDownload$")}) \
           or soup.find("input", {"type": "submit", "name": re.compile("btnDownload$")})
     payload[btn["name"] if btn else "ctl00$ContentPlaceHolder1$btnDownload"] = btn.get("value", "Download") if btn else "Download"
-
-    print(f"{Fore.YELLOW}⚙ Prepared POST payload for {year}-{month}{Style.RESET_ALL}")
+    
+    print(f"{Fore.YELLOW}Prepared POST payload for {year}-{month}{Style.RESET_ALL}")
     return payload
 
 def send_post_request_and_download(base_url, payload, session, referer_url, 
@@ -88,7 +88,7 @@ def send_post_request_and_download(base_url, payload, session, referer_url,
 
     start_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     print(f"{Fore.CYAN}[File {file_index}/{total_files}] Starting download: {output_filename}{Style.RESET_ALL}")
-    print(f"{Fore.YELLOW}⏱ Start time: {start_ts}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}Start time: {start_ts}{Style.RESET_ALL}")
 
     start_time = time.time()
     resp = session.post(base_url, data=payload, headers=headers, stream=True)
@@ -116,12 +116,12 @@ def send_post_request_and_download(base_url, payload, session, referer_url,
         elapsed = time.time() - start_time
         size_mb = os.path.getsize(full_path) / 1024 / 1024
         end_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-        print(f"{Fore.GREEN}✔ Completed {output_filename} in {elapsed:.1f}s ({size_mb:.2f} MB){Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}⏱ End time: {end_ts}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}➜ Progress: {file_index}/{total_files} files complete{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}Completed {output_filename} in {elapsed:.1f}s ({size_mb:.2f} MB){Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}End time: {end_ts}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Progress: {file_index}/{total_files} files complete{Style.RESET_ALL}")
         return size_mb
     else:
-        print(f"{Fore.RED}✖ Response was not a ZIP file. Possible error page returned.{Style.RESET_ALL}")
+        print(f"{Fore.RED}Response was not a ZIP file. Possible error page returned.{Style.RESET_ALL}")
         print(resp.text[:500])
         return 0
 
@@ -138,9 +138,7 @@ def month_year_iter(start_year, start_month, end_year, end_month):
 def run_downloads(soup, session, full_url, base_url, data_dir,
                   start_year, start_month, end_year, end_month,
                   geography, data_fields, request_interval):
-    print(f"{Fore.MAGENTA}═══════════════════════════════════════════════════════{Style.RESET_ALL}")
-    print(f"{Fore.MAGENTA}📅 Selected Date Range: {start_year}-{start_month} ➜ {end_year}-{end_month}{Style.RESET_ALL}")
-    print(f"{Fore.MAGENTA}═══════════════════════════════════════════════════════{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}Selected Date Range: {start_year}-{start_month} to {end_year}-{end_month}{Style.RESET_ALL}")
 
     aspnet_fields = extract_aspnet_state_fields(soup)
     months = list(month_year_iter(start_year, start_month, end_year, end_month))
@@ -159,11 +157,9 @@ def run_downloads(soup, session, full_url, base_url, data_dir,
         total_size += size_mb
 
         if idx < total_files:
-            print(f"{Fore.YELLOW}⏳ Waiting {request_interval} seconds before next request...{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Waiting {request_interval} seconds before next request to avoid rate-limiting...{Style.RESET_ALL}")
             for remaining in trange(request_interval, 0, -1,
-                                    desc="⏳ Waiting",
-                                    unit="s",
-                                    ncols=60,
+                                    desc="Waiting...", unit="s", ncols=60,
                                     bar_format="{desc} ({remaining}s left)"):
                 time.sleep(1)
             print()
@@ -171,18 +167,18 @@ def run_downloads(soup, session, full_url, base_url, data_dir,
     overall_elapsed = time.time() - overall_start
     td = timedelta(seconds=int(overall_elapsed))
     print(f"\n{Fore.MAGENTA}═══════════════════════════════════════════════════════{Style.RESET_ALL}")
-    print(f"{Fore.MAGENTA}✔ All downloads complete: {total_files} files, {total_size:.2f} MB total{Style.RESET_ALL}")
-    print(f"{Fore.MAGENTA}⏱ Total elapsed time: {td} seconds{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}All downloads complete: {total_files} files, {total_size:.2f} MB total{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}Total elapsed time: {td} seconds{Style.RESET_ALL}")
     print(f"{Fore.MAGENTA}═══════════════════════════════════════════════════════{Style.RESET_ALL}")
 
 
 def download_lookup_tables(soup, session, full_url, base_url, lookup_dir):
     """Scrape and download all lookup tables into data/lookup using server filenames."""
-    print(f"{Fore.CYAN}➜ Fetching lookup table links from: {full_url}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}Fetching lookup table links from: {full_url}{Style.RESET_ALL}")
 
     os.makedirs(lookup_dir, exist_ok=True)
     links = soup.find_all("a", class_="dataTDRight")
-    print(f"{Fore.YELLOW}⚙ Found {len(links)} candidate links{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}Found {len(links)} candidate links{Style.RESET_ALL}")
 
     for link in links:
         href = link.get("href")
@@ -201,9 +197,9 @@ def download_lookup_tables(soup, session, full_url, base_url, lookup_dir):
 
             with open(full_path, "wb") as f:
                 f.write(resp.content)
-            print(f"{Fore.GREEN}✔ Saved: {full_path}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Saved: {full_path}{Style.RESET_ALL}")
         except Exception as e:
-            print(f"{Fore.RED}✖ Failed to download {lookup_url}: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}[x] Failed to download {lookup_url}: {e}{Style.RESET_ALL}")
 
 def extract_from_mytable(soup):
     """Scrape table#myTable from an already-fetched soup and extract field metadata."""
@@ -270,7 +266,7 @@ DEFAULT_END_YEAR = 2017
 DEFAULT_END_MONTH = 1
 DEFAULT_GEOGRAPHY = "All"
 DEFAULT_INTERVAL = 60
-DEFAULT_FIELD_FILE = "fields1.txt"
+DEFAULT_FIELD_FILE = "fields2.txt"
 DATA_DIR = "zipped"
 LOOKUP_DIR = "lookup"
 
@@ -292,27 +288,27 @@ if __name__ == "__main__":
     parser.add_argument("-u", "--url",
                         default="https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=",
                         help="URL of the page to scrape for field metadata")
-    parser.add_argument("-y1", "--start-year", type=int, default=DEFAULT_START_YEAR,
-                        help="Start year (default: 2017)")
+    parser.add_argument("-Y1", "--start-year", type=int, default=DEFAULT_START_YEAR,
+                        help=f"Start year (default: {DEFAULT_START_YEAR})")
     parser.add_argument("-M1", "--start-month", type=int, default=DEFAULT_START_MONTH,
-                        help="Start month (default: 1)")
-    parser.add_argument("-y2", "--end-year", type=int, default=DEFAULT_END_YEAR,
-                        help="End year (default: 2017)")
+                        help=f"Start month (default: {DEFAULT_START_MONTH})")
+    parser.add_argument("-Y2", "--end-year", type=int, default=DEFAULT_END_YEAR,
+                        help=f"End year (default: {DEFAULT_END_YEAR})")
     parser.add_argument("-M2", "--end-month", type=int, default=DEFAULT_END_MONTH,
-                        help="End month (default: 1)")
+                        help=f"End month (default: {DEFAULT_END_MONTH})")
     parser.add_argument("-g", "--geography", type=str, default=DEFAULT_GEOGRAPHY,
-                        help="Geography filter (default: All)")
+                        help=f"Geography filter (default: {DEFAULT_GEOGRAPHY})")
     parser.add_argument("-i", "--interval", type=int, default=DEFAULT_INTERVAL,
-                        help="Request interval in seconds (default: 60)")
+                        help=f"Request interval in seconds between downloads to avoid rate-limiting (default: {DEFAULT_INTERVAL})")
     parser.add_argument("-F", "--data-fields", type=str, default=DEFAULT_FIELD_FILE,
-                        help="Path to file containing comma- or newline-separated field names (default: field1.txt)")
+                        help=f"Path to file containing comma- or newline-separated field names (default: {DEFAULT_FIELD_FILE})")
 
     args = parser.parse_args()
 
     # Always fetch initial page first
     soup, session, full_url = fetch_initial_page(BASE_URL, QUERY_PARAMS)
     if not soup:
-        print(f"{Fore.RED}✖ Failed to fetch initial page. Exiting.{Style.RESET_ALL}")
+        print(f"{Fore.RED}[x] Failed to fetch initial page. Exiting.{Style.RESET_ALL}")
         exit(1)
 
     if args.mode == "lookup":
