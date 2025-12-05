@@ -1,5 +1,20 @@
 import argparse
 import os
+import glob
+
+# Default values for CLI
+DEFAULT_MODE = "train"
+DEFAULT_DEVELOPMENT = True
+DEFAULT_GRAPH_TYPE = "base"
+DEFAULT_MODEL_TYPE = "hgtmodel"
+DEFAULT_DATA_PATH = "data/datasets/"
+DEFAULT_GRAPH_DIR = "src/graph/"
+DEFAULT_MODEL_DIR = "src/models/"
+DEFAULT_EPOCHS = 50
+DEFAULT_BATCH_SIZE = 32
+DEFAULT_LR = 0.001
+DEFAULT_PREDICTION_TYPE = "regression"
+DEFAULT_TIME_WINDOW = 6
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -15,26 +30,49 @@ def get_args():
     parser = argparse.ArgumentParser(description="Flight Delay Prediction Configuration")
 
     # General
-    parser.add_argument("--mode", type=str, choices=["train", "test"], default="train", help="Mode of operation")
-    parser.add_argument("--development", type=str2bool, default=True, help="Development mode with smaller dataset ONLY for quick code testing")
-    parser.add_argument("--graph_type", type=str, choices=["base"], default="base", help="Type of graph to build")             # TODO: Add graph types when implemented
-    #parser.add_argument("--model_type", type=str, choices=["dummymodel"], default="dummymodel", help="Type of model to use")   # TODO: Add models when implemented
-    parser.add_argument("--model_type", type=str, choices=["rgcnmodel, hgtmodel"], default="hgtmodel", help="Type of model to use")
-    parser.add_argument("--data_path", type=str, default="data/datasets/DATASET.csv", help="Path to the dataset file")
-    parser.add_argument("--graph_dir", type=str, default="src/graph/", help="Directory to save or load graphs")
-    parser.add_argument("--model_dir", type=str, default="src/models/", help="Directory to save or load models")
+    parser.add_argument("-m", "--mode", type=str, choices=["train", "test"], default=DEFAULT_MODE,
+                        help=f"Mode of operation (default: {DEFAULT_MODE})")
+    parser.add_argument("-d", "--development", action="store_true", default=DEFAULT_DEVELOPMENT,
+                        help=f"Development mode with smaller dataset ONLY for quick code testing (default: {DEFAULT_DEVELOPMENT})")
+    parser.add_argument("-g", "--graph_type", type=str, choices=["base"], default=DEFAULT_GRAPH_TYPE,
+                        help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")             # TODO: Add graph types when implemented
+    # Available models
+    parser.add_argument("-t", "--model_type", type=str, choices=["dummymodel", "rgcnmodel", "hgtmodel"],
+                        default=DEFAULT_MODEL_TYPE, help=f"Type of model to use (default: {DEFAULT_MODEL_TYPE})")
+    parser.add_argument("-D", "--data_path", type=str, default=None,
+                        help=f"Path to a specific dataset file (default: auto-select latest from {DEFAULT_DATA_PATH})")
+    parser.add_argument("-G", "--graph_dir", type=str, default=DEFAULT_GRAPH_DIR,
+                        help=f"Directory to save or load graphs (default: {DEFAULT_GRAPH_DIR})")
+    parser.add_argument("-M", "--model_dir", type=str, default=DEFAULT_MODEL_DIR,
+                        help=f"Directory to save or load models (default: {DEFAULT_MODEL_DIR})")
 
     # Training parameters
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for the optimizer")
+    parser.add_argument("-e", "--epochs", type=int, default=DEFAULT_EPOCHS,
+                        help=f"Number of training epochs (default: {DEFAULT_EPOCHS})")
+    parser.add_argument("-b", "--batch_size", type=int, default=DEFAULT_BATCH_SIZE,
+                        help=f"Batch size for training (default: {DEFAULT_BATCH_SIZE})")
+    parser.add_argument("-l", "--lr", type=float, default=DEFAULT_LR,
+                        help=f"Learning rate for the optimizer (default: {DEFAULT_LR})")
 
-    parser.add_argument("--prediction_type", type=str, choices=["regression", "classification"], default="regression", help="Type of prediction task")
+    parser.add_argument("-p", "--prediction_type", type=str, choices=["regression", "classification"],
+                        default=DEFAULT_PREDICTION_TYPE, help=f"Type of prediction task (default: {DEFAULT_PREDICTION_TYPE})")
 
     # Graph parameters
-    parser.add_argument("--time_window", type=int, default=6, help="Time window (hours) for temporal edges")
+    parser.add_argument("-w", "--time_window", type=int, default=DEFAULT_TIME_WINDOW,
+                        help=f"Time window (hours) for temporal edges (default: {DEFAULT_TIME_WINDOW})")
 
     args = parser.parse_args()
+
+    # If no data_path provided, auto-select the latest dataset in DEFAULT_DATA_PATH
+    if args.data_path is None:
+        pattern = os.path.join(DEFAULT_DATA_PATH, "*.csv")
+        files = glob.glob(pattern)
+        if files:
+            latest = max(files, key=os.path.getmtime)
+            args.data_path = latest
+            print(f"Auto-selected latest dataset: {latest}")
+        else:
+            raise FileNotFoundError(f"No CSV files found in {DEFAULT_DATA_PATH}. Please provide a dataset or run merge.py.")
 
     # Ensure directories exist
     os.makedirs(args.graph_dir, exist_ok=True)

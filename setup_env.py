@@ -49,15 +49,13 @@ def main():
 
     # 4. Install PyTorch core package
     run(
-        f"{python_path} -m pip install torch=={TORCH_VER} "
-        f"-f https://download.pytorch.org/whl/{CUDA_VER}",
+        f"{python_path} -m pip install torch=={TORCH_VER} --index-url https://download.pytorch.org/whl/{CUDA_VER}",
         description="Step 4: Installing PyTorch core package"
     )
 
     # 5. Install PyTorch Geometric extensions
     run(
-        f"{python_path} -m pip install pyg_lib torch_scatter torch_sparse "
-        f"torch_cluster torch_spline_conv "
+        f"{python_path} -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv "
         f"-f https://data.pyg.org/whl/torch-{TORCH_VER}+{CUDA_VER}.html",
         description="Step 5: Installing PyTorch Geometric extensions"
     )
