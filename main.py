@@ -1,5 +1,5 @@
 from src.config import get_args
-from src.data_loader import load_data
+from data.data_loader import load_data
 from src.graph.base import BaseGraph
 from src.models.dummymodel import DummyModel
 from src.models.rgcnmodel import RGCN
