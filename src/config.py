@@ -4,7 +4,6 @@ import glob
 
 # Default values for CLI
 DEFAULT_MODE = "train"
-DEFAULT_DEVELOPMENT = True
 DEFAULT_GRAPH_TYPE = "base"
 DEFAULT_MODEL_TYPE = "hgtmodel"
 DEFAULT_DATA_PATH = "data/datasets/"
@@ -32,8 +31,8 @@ def get_args():
     # General
     parser.add_argument("-m", "--mode", type=str, choices=["train", "test"], default=DEFAULT_MODE,
                         help=f"Mode of operation (default: {DEFAULT_MODE})")
-    parser.add_argument("-d", "--development", action="store_true", default=DEFAULT_DEVELOPMENT,
-                        help=f"Development mode with smaller dataset ONLY for quick code testing (default: {DEFAULT_DEVELOPMENT})")
+    parser.add_argument("-d", "--development", action="store_true",
+                        help=f"Toggle development mode with smaller dataset ONLY for quick code testing")
     parser.add_argument("-g", "--graph_type", type=str, choices=["base"], default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")             # TODO: Add graph types when implemented
     # Available models
