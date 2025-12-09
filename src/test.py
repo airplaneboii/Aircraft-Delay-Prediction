@@ -20,14 +20,14 @@ def test(
 
     model.eval()
     with torch.no_grad():
-        out = model(graph["airport"].x, graph["airport", "flies_to", "airport"].edge_index)
+        out = model(graph.x_dict, graph.edge_index_dict)
 
         if args.prediction_type == "regression":
-            labels = graph["airport"].y.float().squeeze(-1)
+            labels = graph["flight"].y.float().squeeze(-1)
             results = regression_metrics(labels, out.squeeze())
             print(results)
         else:
-            labels = graph["airport"].y.long()
+            labels = graph["flight"].y.long()
             preds = torch.argmax(out, dim=1)
             results = classification_metrics(labels, preds)
             print(results)
