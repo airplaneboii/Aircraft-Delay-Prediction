@@ -5,6 +5,7 @@ def load_data(
         mode: str = "train",
         task_type: str = "regression",
         development: bool = True,
+        split_dim: tuple[int, int, int] = (80, 10, 10)
         ) -> pd.DataFrame:
     """Load the merged CSV into a DataFrame.
 
@@ -23,7 +24,7 @@ def load_data(
         df = df.head(max_rows).reset_index(drop=True)
         print(f"Development mode: using first {max_rows} rows.")
 
-    # Create target column based on task type, but do not perform cleaning here.
+    # Create target column based on task type
     if task_type == "regression":
         if "ARR_DELAY" in df.columns:
             df["y"] = df["ARR_DELAY"]
@@ -35,10 +36,23 @@ def load_data(
         else:
             df["y"] = 0
 
-    # Split data (placeholder)
-    if mode == "train":
-        print("Loaded data in train mode.")
-    elif mode == "test":
-        print("Loaded data in test mode.")
+    # Split data
+    num_data = len(df)
+    i_train = int(num_data * split_dim[0] / 100)
+    i_val = int(num_data * (split_dim[0] + split_dim[1]) / 100)
 
-    return df
+    df_train = df.iloc[:i_train].reset_index(drop=True)
+    df_val = df.iloc[i_train:i_val].reset_index(drop=True)
+    df_test = df.iloc[i_val:].reset_index(drop=True)
+
+#    # for now
+#    dates = df["FL_DATE"].unique().sort_values()
+#    dates_train = dates[:int(len(dates) * split_dim[0] / 100)]
+#    dates_val = dates[int(len(dates) * split_dim[0] / 100):int(len(dates) * (split_dim[0] + split_dim[1]) / 100)]
+#    dates_test = dates[int(len(dates) * (split_dim[0] + split_dim[1]) / 100):]
+#
+#    set_train = df["FL_DATE"].isin(dates_train)
+#    set_val = df["FL_DATE"].isin(dates_val)
+#    set_test = df["FL_DATE"].isin(dates_test)
+
+    return df_train, df_val, df_test

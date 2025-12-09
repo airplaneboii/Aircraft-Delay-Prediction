@@ -11,13 +11,15 @@ import torch
 
 def main():
     args = get_args()
-    df = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type, development=args.development)
+    set_train, set_val, set_test = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type, development=args.development)
     ensure_dir(args.graph_dir)
     ensure_dir(args.model_dir)
+    
 
     # Build graph
+    data = set_train if args.mode == "train" else (set_val if args.mode == "val" else set_test)
     if args.graph_type == "base":
-        graph = BaseGraph(df, args).build()
+        graph = BaseGraph(data, args).build()
     else:
         print(args.graph_type)
         raise ValueError("Unsupported graph type.")
@@ -71,7 +73,7 @@ def main():
     elif args.mode == "train":
         train(model, graph, args)
         torch.save(model.state_dict(), f"{args.model_dir}/{args.model_type}.pt")
-    elif args.mode == "test":
+    elif args.mode == "test" or args.mode == "val":
         model.load_state_dict(torch.load(f"{args.model_dir}/{args.model_type}.pt"))
         test(model, graph, args)
 

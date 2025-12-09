@@ -29,7 +29,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="Flight Delay Prediction Configuration")
 
     # General
-    parser.add_argument("-m", "--mode", type=str, choices=["train", "test"], default=DEFAULT_MODE,
+    parser.add_argument("-m", "--mode", type=str, choices=["train", "val", "test"], default=DEFAULT_MODE,
                         help=f"Mode of operation (default: {DEFAULT_MODE})")
     parser.add_argument("-d", "--development", action="store_true",
                         help=f"Toggle development mode with smaller dataset ONLY for quick code testing")
