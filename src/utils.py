@@ -1,6 +1,12 @@
 import os
 import torch
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, f1_score
+from torch_geometric.data import HeteroData
+
+try:
+    from torch_geometric.profile.utils import get_data_size  # available in recent PyG
+except Exception:
+    get_data_size = None
 
 def ensure_dir(
         directory: str
@@ -60,3 +66,92 @@ def move_graph_to_device(graph, device):
     for edge_type in graph.edge_types:
         graph[edge_type].edge_index = graph[edge_type].edge_index.to(device)
     return graph
+
+
+################ GRAPH STATISTICS ####################
+def print_graph_stats(data: HeteroData):
+    """Print detailed graph statistics (node/edge counts, feature shapes, approximate memory)."""
+    try:
+        def _sizeof(t: torch.Tensor) -> int:
+            return t.numel() * t.element_size()
+
+        node_bytes = {}
+        edge_bytes = {}
+        total_nodes = 0
+        total_edges = 0
+        print("\n" + "="*70)
+        print(" "*27 + "GRAPH STATISTICS")
+        print("="*70)
+
+        # Nodes
+        print("\nNODE TYPES:")
+        node_total_bytes = 0
+        for ntype in data.node_types:
+            x = getattr(data[ntype], 'x', None)
+            if isinstance(x, torch.Tensor):
+                n_nodes = x.size(0)
+                feat_shape = tuple(x.shape)
+                dtype = x.dtype
+                node_bytes[ntype] = _sizeof(x)
+                node_total_bytes += node_bytes[ntype]
+            else:
+                n_nodes = getattr(data[ntype], 'num_nodes', 'unknown')
+                feat_shape = None
+                dtype = None
+                node_bytes[ntype] = 0
+            if isinstance(n_nodes, int):
+                total_nodes += n_nodes
+            mb = node_bytes[ntype] / (1024 * 1024)
+            print(f"  {ntype:12s}: count={n_nodes:7}, shape={str(feat_shape):20s}, dtype={str(dtype):15s}, memory={mb:8.2f} MB")
+
+        print(f"\n  >>> TOTAL NODES: {total_nodes:,}")
+        print(f"  >>> NODE MEMORY: {node_total_bytes / (1024*1024):.2f} MB")
+
+        # Edges
+        print("\nEDGE TYPES:")
+        edge_total_bytes = 0
+        for etype in data.edge_types:
+            eidx = getattr(data[etype], 'edge_index', None)
+            if isinstance(eidx, torch.Tensor):
+                num_edges = eidx.size(1)
+                shape = tuple(eidx.shape)
+                edge_bytes[etype] = _sizeof(eidx)
+                edge_total_bytes += edge_bytes[etype]
+            else:
+                num_edges = 0
+                shape = None
+                edge_bytes[etype] = 0
+            total_edges += num_edges
+            mb = edge_bytes[etype] / (1024 * 1024)
+            etype_str = str(etype)[:40]
+            print(f"  {etype_str:42s}: edges={num_edges:7,}, shape={str(shape):20s}, memory={mb:8.2f} MB")
+
+        print(f"\n  >>> TOTAL EDGES: {total_edges:,}")
+        print(f"  >>> EDGE MEMORY: {edge_total_bytes / (1024*1024):.2f} MB")
+
+        # Labels / other tensors
+        y = getattr(data['flight'], 'y', None)
+        label_bytes = 0
+        if isinstance(y, torch.Tensor):
+            label_bytes = _sizeof(y)
+            mb = label_bytes / (1024 * 1024)
+            print(f"\nLABELS:")
+            print(f"  flight.y: shape={tuple(y.shape)}, dtype={y.dtype}, memory={mb:.2f} MB")
+
+        # Grand totals
+        total_bytes = node_total_bytes + edge_total_bytes + label_bytes
+        print("\n" + "="*70)
+        print(f"TOTAL MEMORY: {total_bytes / (1024*1024):.2f} MB ({total_bytes / 1024:.1f} KB, {total_bytes} bytes)")
+        print("="*70 + "\n")
+
+        if get_data_size is not None:
+            try:
+                builtin_bytes = get_data_size(data)
+                builtin_mb = builtin_bytes / (1024 * 1024)
+                print(f"PyG get_data_size() validation: {builtin_mb:.2f} MB")
+            except Exception as inner_e:
+                print("Note: get_data_size() failed:", inner_e)
+        else:
+            print("Note: get_data_size() not available in this PyG version.")
+    except Exception as e:
+        print("Warning: failed to compute graph stats:", e)

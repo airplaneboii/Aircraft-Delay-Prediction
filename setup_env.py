@@ -68,8 +68,8 @@ def main():
         description="Step 7: Installing DeepSNAP from GitHub")
 
     # 8. Other libraries
-    run(f"{python_path} -m pip install pandas tqdm colorama requests beautifulsoup4 scikit-learn",
-        description="Step 8: Installing utility libraries (pandas, tqdm, colorama, requests, bs4, scikit-learn)")
+    run(f"{python_path} -m pip install pandas tqdm colorama requests beautifulsoup4 scikit-learn pyyaml",
+        description="Step 8: Installing utility libraries (pandas, tqdm, colorama, requests, bs4, scikit-learn, pyyaml)")
 
     print("\nEnvironment setup complete!")
     print(f"Activate your venv with:\n  source {VENV_DIR}/bin/activate   (Linux/macOS)\n  {VENV_DIR}\\Scripts\\activate    (Windows)")

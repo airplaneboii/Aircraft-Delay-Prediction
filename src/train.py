@@ -53,7 +53,10 @@ def train(
         # Compute metrics for monitoring
         if args.prediction_type == "regression":
             metrics_results = regression_metrics(labels, preds)
-            metrics_str = f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, RMSE: {metrics_results['RMSE']:.4f}"
+            metrics_str = (
+                f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
+                f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
+            )
         else:
             metrics_results = classification_metrics(labels, torch.argmax(out, dim=1))
             metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"

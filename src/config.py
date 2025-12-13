@@ -32,33 +32,37 @@ def get_args():
     parser.add_argument("-m", "--mode", type=str, choices=["train", "val", "test"], default=DEFAULT_MODE,
                         help=f"Mode of operation (default: {DEFAULT_MODE})")
     parser.add_argument("-d", "--development", action="store_true",
-                        help=f"Toggle development mode with smaller dataset ONLY for quick code testing")
+                        help=f"Toggle development mode with smaller dataset ONLY for quick code testing")    
+    
+    # Graphs and graph parameters 
     parser.add_argument("-g", "--graph_type", type=str, choices=["base"], default=DEFAULT_GRAPH_TYPE,
-                        help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")             # TODO: Add graph types when implemented
+                        help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")   #TODO: Add more graph types when implemented
+    parser.add_argument("-s", "--save_graph", type=str, default=None,
+                        help="Filename to save the built graph to (e.g., 'graph.pt'; default: None, don't save)")
+    parser.add_argument("-l", "--load_graph", type=str, default=None,
+                        help="Filename to load a pre-built graph from (e.g., 'graph.pt'; default: None, build from scratch)")
+    parser.add_argument("-w", "--time_window", type=int, default=DEFAULT_TIME_WINDOW,
+                        help=f"Time window (hours) for temporal edges (default: {DEFAULT_TIME_WINDOW})")
+    
     # Available models
-    parser.add_argument("-t", "--model_type", type=str, choices=["dummymodel", "rgcnmodel", "hgtmodel"],
+    parser.add_argument("-t", "--model_type", type=str, choices=["none", "dummymodel", "rgcnmodel", "hgtmodel", "heterosage"],
                         default=DEFAULT_MODEL_TYPE, help=f"Type of model to use (default: {DEFAULT_MODEL_TYPE})")
     parser.add_argument("-D", "--data_path", type=str, default=None,
                         help=f"Path to a specific dataset file (default: auto-select latest from {DEFAULT_DATA_PATH})")
     parser.add_argument("-G", "--graph_dir", type=str, default=DEFAULT_GRAPH_DIR,
                         help=f"Directory to save or load graphs (default: {DEFAULT_GRAPH_DIR})")
     parser.add_argument("-M", "--model_dir", type=str, default=DEFAULT_MODEL_DIR,
-                        help=f"Directory to save or load models (default: {DEFAULT_MODEL_DIR})")
-
+                        help=f"Directory to save or load models (default: {DEFAULT_MODEL_DIR})")    
+    
     # Training parameters
     parser.add_argument("-e", "--epochs", type=int, default=DEFAULT_EPOCHS,
                         help=f"Number of training epochs (default: {DEFAULT_EPOCHS})")
     parser.add_argument("-b", "--batch_size", type=int, default=DEFAULT_BATCH_SIZE,
                         help=f"Batch size for training (default: {DEFAULT_BATCH_SIZE})")
-    parser.add_argument("-l", "--lr", type=float, default=DEFAULT_LR,
+    parser.add_argument("-r", "--lr", type=float, default=DEFAULT_LR,
                         help=f"Learning rate for the optimizer (default: {DEFAULT_LR})")
-
     parser.add_argument("-p", "--prediction_type", type=str, choices=["regression", "classification"],
                         default=DEFAULT_PREDICTION_TYPE, help=f"Type of prediction task (default: {DEFAULT_PREDICTION_TYPE})")
-
-    # Graph parameters
-    parser.add_argument("-w", "--time_window", type=int, default=DEFAULT_TIME_WINDOW,
-                        help=f"Time window (hours) for temporal edges (default: {DEFAULT_TIME_WINDOW})")
 
     args = parser.parse_args()
 
