@@ -13,6 +13,18 @@ from splitter import split_file_to_list, format_list
 # Initialize colorama (needed on Windows)
 init(autoreset=True)
 
+BASE_URL = "https://www.transtats.bts.gov/DL_SelectFields.aspx"
+QUERY_PARAMS = {"gnoyr_VQ": "FGJ", "QO_fu146_anzr": ""}
+DEFAULT_START_YEAR = 2017
+DEFAULT_START_MONTH = 1
+DEFAULT_END_YEAR = 2017
+DEFAULT_END_MONTH = 1
+DEFAULT_GEOGRAPHY = "All"
+DEFAULT_INTERVAL = 60
+DEFAULT_FIELD_FILE = "fields2.txt"
+DATA_DIR = "zipped"
+LOOKUP_DIR = "lookup"
+
 def fetch_initial_page(base_url, query_params):
     """Stage 1: Perform the initial GET request to the TranStats page."""
     full_get_url = f"{base_url}?{urllib.parse.urlencode(query_params)}"
@@ -149,7 +161,7 @@ def run_downloads(soup, session, full_url, base_url, data_dir,
 
     for idx, (year, month) in enumerate(months, start=1):
         payload = prepare_post_payload(aspnet_fields, year, month, geography, data_fields, soup)
-        filename = f"{year}_{month}_{geography}.zip"
+        filename = f"{year}_{month:02d}_{geography}.zip"
         size_mb = send_post_request_and_download(
             base_url, payload, session, full_url,
             filename, idx, total_files, data_dir
@@ -257,36 +269,16 @@ def print_markdown_table(rows, include_separators=False):
             print(f"| {r['field_id']} | {r['label']} | {r['description']} |")
 
 
-# ─── Constants ────────────────────────────────────────────────────────────────
-BASE_URL = "https://www.transtats.bts.gov/DL_SelectFields.aspx"
-QUERY_PARAMS = {"gnoyr_VQ": "FGJ", "QO_fu146_anzr": ""}
-DEFAULT_START_YEAR = 2017
-DEFAULT_START_MONTH = 1
-DEFAULT_END_YEAR = 2017
-DEFAULT_END_MONTH = 1
-DEFAULT_GEOGRAPHY = "All"
-DEFAULT_INTERVAL = 60
-DEFAULT_FIELD_FILE = "fields2.txt"
-DATA_DIR = "zipped"
-LOOKUP_DIR = "lookup"
-
-# ─── Main ─────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="TranStats bulk downloader and field extractor")
-    parser.add_argument("-m", "--mode",
-                        choices=["data", "lookup", "md", "ids"],
-                        default="data",
+    parser.add_argument("-m", "--mode", choices=["data", "lookup", "md", "ids"], default="data",
                         help="Select 'data' to download ZIPs, 'lookup' for lookup tables, "
                             "'md' for Markdown field table, or 'ids' for formatted ID list")
-    parser.add_argument("-is", "--include-separators",
-                        action="store_true",
+    parser.add_argument("-is", "--include-separators", action="store_true",
                         help="Include separator rows in Markdown output (only applies to mode=md)")
-    parser.add_argument("-f", "--format",
-                        choices=["newline", "quoted-newline-comma", "comma", "quoted-comma"],
-                        default="comma",
+    parser.add_argument("-f", "--format", choices=["newline", "quoted-newline-comma", "comma", "quoted-comma"], default="comma",
                         help="Formatting style for ID list (only applies to mode=ids)")
-    parser.add_argument("-u", "--url",
-                        default="https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=",
+    parser.add_argument("-u", "--url", default="https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=",
                         help="URL of the page to scrape for field metadata")
     parser.add_argument("-Y1", "--start-year", type=int, default=DEFAULT_START_YEAR,
                         help=f"Start year (default: {DEFAULT_START_YEAR})")
@@ -338,3 +330,6 @@ if __name__ == "__main__":
             DATA_FIELDS,
             args.interval
         )
+
+if __name__ == "__main__":
+    main()        
