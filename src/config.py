@@ -10,10 +10,13 @@ DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
 DEFAULT_EPOCHS = 50
-DEFAULT_BATCH_SIZE = 32
+DEFAULT_BATCH_SIZE = 100000
 DEFAULT_LR = 0.001
 DEFAULT_PREDICTION_TYPE = "regression"
 DEFAULT_TIME_WINDOW = 6
+DEFAULT_NEIGHBOR_SAMPLING = False
+DEFAULT_NEIGHBOR_FANOUTS = "15,10"
+DEFAULT_VERBOSITY_LEVEL = 1
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -25,9 +28,21 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def parse_fanouts(fanout_str: str):
+    parts = [p.strip() for p in fanout_str.split(",") if p.strip()]
+    if not parts:
+        return None
+    try:
+        return [int(p) for p in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Fanouts must be a comma-separated list of integers") from exc
+
 def get_args():
     parser = argparse.ArgumentParser(description="Flight Delay Prediction Configuration")
 
+    # Allow passing a config file which will supply defaults for CLI options.
+    parser.add_argument("-c", "--config", type=str, default=None,
+                        help="Path to a JSON or YAML config file to load default argument values from")
     # General
     parser.add_argument("-m", "--mode", type=str, choices=["train", "val", "test"], default=DEFAULT_MODE,
                         help=f"Mode of operation (default: {DEFAULT_MODE})")
@@ -47,7 +62,7 @@ def get_args():
     # Available models
     parser.add_argument("-t", "--model_type", type=str, choices=["none", "dummymodel", "rgcnmodel", "hgtmodel", "heterosage"],
                         default=DEFAULT_MODEL_TYPE, help=f"Type of model to use (default: {DEFAULT_MODEL_TYPE})")
-    parser.add_argument("-D", "--data_path", type=str, default=None,
+    parser.add_argument("-D", "--data_path", type=str, default=DEFAULT_DATA_PATH,
                         help=f"Path to a specific dataset file (default: auto-select latest from {DEFAULT_DATA_PATH})")
     parser.add_argument("-G", "--graph_dir", type=str, default=DEFAULT_GRAPH_DIR,
                         help=f"Directory to save or load graphs (default: {DEFAULT_GRAPH_DIR})")
@@ -57,25 +72,70 @@ def get_args():
     # Training parameters
     parser.add_argument("-e", "--epochs", type=int, default=DEFAULT_EPOCHS,
                         help=f"Number of training epochs (default: {DEFAULT_EPOCHS})")
-    parser.add_argument("-b", "--batch_size", type=int, default=DEFAULT_BATCH_SIZE,
-                        help=f"Batch size for training (default: {DEFAULT_BATCH_SIZE})")
     parser.add_argument("-r", "--lr", type=float, default=DEFAULT_LR,
                         help=f"Learning rate for the optimizer (default: {DEFAULT_LR})")
     parser.add_argument("-p", "--prediction_type", type=str, choices=["regression", "classification"],
                         default=DEFAULT_PREDICTION_TYPE, help=f"Type of prediction task (default: {DEFAULT_PREDICTION_TYPE})")
+    parser.add_argument("-b", "--batch_size", type=int, default=DEFAULT_BATCH_SIZE,
+                        help=f"Batch size for training (default: {DEFAULT_BATCH_SIZE})")
+    parser.add_argument("-n", "--neighbor_sampling", action="store_true", default=DEFAULT_NEIGHBOR_SAMPLING,
+                        help="Enable mini-batch neighbor sampling instead of full-batch training (default: disabled)")
+    parser.add_argument("-f", "--neighbor_fanouts", type=parse_fanouts, default=DEFAULT_NEIGHBOR_FANOUTS,
+                        help=f"Comma-separated neighbors to sample per layer, e.g. '15,10' (default: {DEFAULT_NEIGHBOR_FANOUTS})")
+    # Logging / verbosity
+    parser.add_argument("-v", "--verbosity", type=int, choices=[0,1,2], default=DEFAULT_VERBOSITY_LEVEL,
+                        help="Verbosity level: 0=warning, 1=info, 2=debug")
 
+    # First parse known args to see if a config file was specified
+    preliminary, remaining = parser.parse_known_args()
+    if preliminary.config:
+        # Load config file (JSON or YAML if available)
+        cfg_path = preliminary.config
+        if not os.path.exists(cfg_path):
+            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+        cfg_text = open(cfg_path, "r", encoding="utf-8").read()
+        cfg = None
+        try:
+            import json
+            cfg = json.loads(cfg_text)
+        except Exception:
+            # Try YAML if json failed
+            try:
+                import yaml
+                cfg = yaml.safe_load(cfg_text)
+            except Exception as e:
+                raise RuntimeError("Failed to parse config file. Install pyyaml or provide JSON.") from e
+
+        if not isinstance(cfg, dict):
+            raise RuntimeError("Config file must contain a top-level object/dictionary of options")
+
+        # Set defaults on the parser so CLI can still override them
+        parser.set_defaults(**cfg)
+
+    # Now parse final args (with config defaults applied)
     args = parser.parse_args()
 
-    # If no data_path provided, auto-select the latest dataset in DEFAULT_DATA_PATH
-    if args.data_path is None:
-        pattern = os.path.join(DEFAULT_DATA_PATH, "*.csv")
+    # Normalize neighbor fanouts: allow None to mean full-neighbor sampling
+    if isinstance(args.neighbor_fanouts, str):
+        args.neighbor_fanouts = parse_fanouts(args.neighbor_fanouts)
+
+    # If data_path is not provided or points to a directory, auto-select the latest CSV in that directory
+    # Treat empty string as not provided (useful for YAML configs that set data_path: "").
+    if not args.data_path or os.path.isdir(args.data_path):
+        # choose directory to search: provided dir or DEFAULT_DATA_PATH
+        search_dir = args.data_path if args.data_path and os.path.isdir(args.data_path) else DEFAULT_DATA_PATH
+        pattern = os.path.join(search_dir, "*.csv")
         files = glob.glob(pattern)
         if files:
             latest = max(files, key=os.path.getmtime)
             args.data_path = latest
             print(f"Auto-selected latest dataset: {latest}")
         else:
-            raise FileNotFoundError(f"No CSV files found in {DEFAULT_DATA_PATH}. Please provide a dataset or run merge.py.")
+            raise FileNotFoundError(f"No CSV files found in {search_dir}. Please provide a dataset or run merge.py.")
+    else:
+        # If a file path was provided, validate it exists
+        if not os.path.exists(args.data_path):
+            raise FileNotFoundError(f"Provided data_path does not exist: {args.data_path}")
 
     # Ensure directories exist
     os.makedirs(args.graph_dir, exist_ok=True)

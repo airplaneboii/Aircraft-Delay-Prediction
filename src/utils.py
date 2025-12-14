@@ -2,11 +2,36 @@ import os
 import torch
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, f1_score
 from torch_geometric.data import HeteroData
+import logging
+from typing import Optional
 
 try:
     from torch_geometric.profile.utils import get_data_size  # available in recent PyG
 except Exception:
     get_data_size = None
+
+###################### SETUP LOGGING ######################
+def setup_logging(verbosity: int = 0, logfile: Optional[str] = None) -> logging.Logger:
+    """Configure root logger for the application.
+
+    verbosity: 0=WARNING, 1=INFO, 2=DEBUG
+    """
+    level = logging.WARNING
+    if verbosity >= 2:
+        level = logging.DEBUG
+    elif verbosity == 1:
+        level = logging.INFO
+
+    handlers = [logging.StreamHandler()]
+    if logfile:
+        handlers.append(logging.FileHandler(logfile))
+
+    logging.basicConfig(level=level,
+                        format="%(asctime)s %(levelname)s: %(message)s",
+                        datefmt="%H:%M:%S",
+                        handlers=handlers)
+    return logging.getLogger("train")
+
 
 def ensure_dir(
         directory: str
@@ -16,9 +41,7 @@ def ensure_dir(
         os.makedirs(directory)
 
 
-######################
-# Evaluation metrics #
-######################
+###################### EVALUATION METRICS ######################
 def regression_metrics(
         y_true: torch.Tensor,
         y_pred: torch.Tensor

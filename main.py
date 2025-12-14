@@ -6,13 +6,17 @@ from src.models.hgtmodel import HGT
 from src.models.rgcnmodel import RGCN
 from src.train import train
 from src.test import test
-from src.utils import ensure_dir, move_graph_to_device, print_graph_stats
+from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats
 from data.data_loader import load_data
 import torch
 import os
 
 def main():
     args = get_args()    
+    # Configure logging as early as possible
+    verbosity = getattr(args, "verbosity", 0)
+    logger = setup_logging(verbosity)
+    logger.info("Starting run with args: %s", vars(args))
     ensure_dir(args.graph_dir)
     ensure_dir(args.model_dir)
     
@@ -52,8 +56,11 @@ def main():
     print("checking for GPUs...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-
-    graph = move_graph_to_device(graph, device)
+    use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
+    if use_neighbor_sampling and args.mode == "train":
+        print("Neighbor sampling enabled: keeping full graph on CPU; mini-batches will be moved per step.")
+    else:
+        graph = move_graph_to_device(graph, device)
     metadata = graph.metadata() #metadata[0] are node types, metadata[1] are edge types
     in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
 

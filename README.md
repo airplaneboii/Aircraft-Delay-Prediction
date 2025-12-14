@@ -76,28 +76,67 @@ options:
 The list of all available fields (`fields_all.txt`), the description table (`legend.md`) and the lookup tables (in `lookup`) are already in the repository.
 The datasets however are too large to store on GitHub so they either have to be merged from the zip files provided in `zipped`, or parsed again.
 
-For parsing data you have to provide a date range as descriped in help, and a text file that contains a list of fields you want to parse. Currently there are 3 templates, the default being `fields1.txt`. The fields in the provided files are separated by newlines for readability, but multiple separators are supported and should be detected automatically. As an example here's how to parse fields `fields1.txt` from November 2017 to January 2018 (inclusive):
+For parsing data you have to provide a date range as descriped in help, and a text file that contains a list of fields you want to parse. Currently there are 3 templates, the default being `fields2.txt`. The fields in the provided files are separated by newlines for readability, but multiple separators are supported and should be detected automatically. As an example here's how to parse fields `fields1.txt` from November 2017 to January 2018 (inclusive):
 ```bash
 python parser.py -m data -Y1 2017 -M1 11 -Y2 2018 -M2 1 -F fields1.txt
 ```
-To unzip and merge files into a single dataset simply run:
+To use the data, the CSVs need to extracted and merged. The `merge.py` helper unzips TranStats ZIPs, optionally filters by date, cleans and converts dtypes, and merges CSVs into a single dataset.
+
+Usage modes and options:
+
+- Normal (default): unzip any matching ZIPs from `data/zipped/` into `data/unzipped/`, then merge available CSVs into `data/datasets/`.
+- `--unzip-only`: only extract ZIP files (no merge).
+- `--merge-only`: only merge existing CSVs in `--unzip-dir` (no extraction).
+- `--dry-run`: display which ZIPs/CSVs would be processed, then exit.
+- Date filtering: use `--start-year`, `--start-month`, `--end-year`, `--end-month` to select a contiguous inclusive range of files named like `YYYY_MM...`.
+- `--essential-cols PATH`: drop rows missing the listed essential columns (file with one column name per line)
+- `--dtypes-file PATH`: YAML mapping of column -> dtype to apply conversions (skipped if missing or empty).
+- Output naming: merged file is written to `--merged-dir` (default `data/datasets/`) with prefix `--output-prefix` and a timestamp (so multiple runs produce distinct files).
+
+For a full list of available arguments, run `python merge.py -h`.
+
+Examples:
+
 ```bash
+# Default: unzip+merge everything found in data/zipped/ and data/unzipped/
 python merge.py
+
+# Only show what would be done (no changes):
+python merge.py --dry-run
+
+# Only extract ZIPs in a given input dir:
+python merge.py --input-dir my_zips --unzip-only
+
+# Merge only existing CSVs (skip unzipping):
+python merge.py --merge-only --unzip-dir data/unzipped
+
+# Merge a specific date range (Nov 2017 - Jan 2018) and apply dtype mapping:
+python merge.py -Y1 2017 -M1 11 -Y2 2018 -M2 1 --dtypes-file data/dtypes.yaml
 ```
-The dataset will then be stored in `data/datasets`. It adds a timestamp to the filename so multiple datasets can be compiled and stored in the directory. 
 
 **Don't forget to change back to the project directory when you're done dealing with data!**
 
 ---
-## Run the code with
+## Running the main program
+
+Model training, validation and testing is all performed by running `main.py` with command line arguments to configure parameters. To get a comprehensive list, run:
 ```bash
-python main.py
+python main.py -h
 ```
-To adjust model parameters, as well to select to train or test model, use additional `argparse` arguments. All of them are listed in `src/config.py`. Example of how to run code using those arguments:
+Example:
 ```bash
 python main.py --mode train --model_type rgcnmodel --epochs 100 --lr 0.0005
 ```
-For more details run `python main.py -h`
+However it is recommended to use config files instead, as there are a lot of arguments and it becomes difficult to manage. There are examples in the `configs` folder. To use a config file, run:
+```bash
+python main.py -c path/to/config/file
+```
+You don't have to set all available arguments in your config file, the unused arguments will be set to their default values, which can be seen in `configs/defaults.yaml`. Both JSON and YAML files are supported. If you want to override some config file arguments, you can still do that:
+```bash
+python main.py -c path/to/config/file --mode test --neighbor_sampling
+```
+This example would take all values from the config file, but replace the mode and neighbor sampling values with the ones provided in the command line.
+
 ---
 ## Editing
 To add model, add new `.py` code of your model to `src/models/` folder. To add graph, add new `.py` code of your model to `src/graph/` folder. Following python structure of other models/graphs is strongly encouraged. Additionally, filename should be added to argument list in `src/config.py`. Simmilarly, `main.py` should be updated (new `elif` option should be properly added).

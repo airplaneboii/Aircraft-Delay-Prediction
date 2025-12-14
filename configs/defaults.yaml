@@ -1,0 +1,18 @@
+# Default configuration values mirroring src/config.py
+mode: train
+development: false
+graph_type: base
+save_graph: ""
+load_graph: ""
+time_window: 6
+model_type: hgtmodel
+data_path: data/datasets/
+graph_dir: src/graph/
+model_dir: src/models/
+epochs: 50
+lr: 0.001
+prediction_type: regression
+batch_size: 100000
+neighbor_sampling: false
+neighbor_fanouts: "15,10"
+verbosity: 1

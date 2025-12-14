@@ -56,58 +56,80 @@ class RGCN(nn.Module):
         x_dict = {
             node_type: F.relu(self.encoders[node_type](x))
             for node_type, x in x_dict.items()
+            if node_type in self.encoders
         }
 
-        # Convert x_dict to a single tensor (concatenate all node types)
-        # and build a mapping for relation indices
-        node_type_to_idx = {nt: i for i, nt in enumerate(self.node_types)}
+        if not x_dict:
+            raise ValueError("RGCN received no node features to process.")
+        
+        # Prefer model parameter device; fall back to first input tensor device, then CPU
+        first_param = next(iter(self.parameters()), None)
+        if first_param is not None:
+            device = first_param.device
+        else:
+            # x_dict has at least one entry here
+            device = next(iter(x_dict.values())).device if x_dict else torch.device("cpu")
+        dtype = next(iter(x_dict.values())).dtype
+
+        # Compute node offsets and total node count
         node_offsets = {}
         offset = 0
         for node_type in self.node_types:
             node_offsets[node_type] = offset
-            offset += x_dict[node_type].size(0)
-        
+            if node_type in x_dict:
+                offset += x_dict[node_type].size(0)
         total_nodes = offset
-        x = torch.zeros(total_nodes, self.hidden_channels, device=x_dict[self.node_types[0]].device, dtype=x_dict[self.node_types[0]].dtype)
-        
-        # Fill x tensor with node features from each type
+
+        # Build the concatenated node feature tensor (always needed, even when reusing edge cache)
+        x = torch.empty(total_nodes, self.hidden_channels, device=device, dtype=dtype)
+        x.zero_()
         for node_type in self.node_types:
+            if node_type not in x_dict:
+                continue
             start = node_offsets[node_type]
             end = start + x_dict[node_type].size(0)
             x[start:end] = x_dict[node_type]
 
-        # Convert edge_index_dict to a single edge_index and relation type indices
-        edge_index_list = []
-        relation_type_list = []
-        for rel_idx, (src_type, rel_name, dst_type) in enumerate(self.edge_types):
-            if (src_type, rel_name, dst_type) in edge_index_dict:
-                edge_idx = edge_index_dict[(src_type, rel_name, dst_type)]
-                # Offset node indices by their cumulative position
+        # Build edge_index and edge_type for this forward
+        total_edges = 0
+        for (src_type, rel_name, dst_type) in self.edge_types:
+            key = (src_type, rel_name, dst_type)
+            if key in edge_index_dict:
+                total_edges += edge_index_dict[key].size(1)
+
+        if total_edges == 0:
+            edge_index = torch.zeros((2, 0), device=device, dtype=torch.long)
+            edge_type = torch.zeros(0, device=device, dtype=torch.long)
+        else:
+            edge_index = torch.empty((2, total_edges), device=device, dtype=torch.long)
+            edge_type = torch.empty((total_edges,), device=device, dtype=torch.long)
+            pos = 0
+            for rel_idx, (src_type, rel_name, dst_type) in enumerate(self.edge_types):
+                key = (src_type, rel_name, dst_type)
+                if key not in edge_index_dict:
+                    continue
+                e = edge_index_dict[key].to(device).clone()
                 src_offset = node_offsets[src_type]
                 dst_offset = node_offsets[dst_type]
-                offset_edge_idx = edge_idx.clone()
-                offset_edge_idx[0] += src_offset
-                offset_edge_idx[1] += dst_offset
-                edge_index_list.append(offset_edge_idx)
-                relation_type_list.extend([rel_idx] * edge_idx.size(1))
-        
-        if edge_index_list:
-            edge_index = torch.cat(edge_index_list, dim=1)
-            edge_type = torch.tensor(relation_type_list, device=x.device, dtype=torch.long)
-        else:
-            # Empty graph fallback
-            edge_index = torch.zeros((2, 0), device=x.device, dtype=torch.long)
-            edge_type = torch.zeros(0, device=x.device, dtype=torch.long)
+                e[0].add_(src_offset)
+                e[1].add_(dst_offset)
+                n = e.size(1)
+                edge_index[:, pos:pos+n] = e
+                edge_type[pos:pos+n] = rel_idx
+                pos += n
 
         # Pass through RGCN layers
         for conv in self.convs:
             x = conv(x, edge_index, edge_type)
-            x = F.relu(x)
+            x = F.relu(x, inplace=True)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
         # Extract flight node embeddings and predict
+        flight_feats = x_dict.get("flight")
+        if flight_feats is None:
+            raise KeyError("Flight node type is required for RGCN forward pass.")
         flight_start = node_offsets["flight"]
-        flight_end = flight_start + x_dict["flight"].size(0)
+        flight_end = flight_start + flight_feats.size(0)
         flight_x = x[flight_start:flight_end]
-        
+
         return self.readout(flight_x).squeeze(-1)
