@@ -1,5 +1,6 @@
 from src.config import get_args
 from src.graph.base import BaseGraph
+from src.graph.heteroNew import HeteroNewGraph
 from src.models.dummymodel import DummyModel
 from src.models.heterosage import HeteroSAGE
 from src.models.hgtmodel import HGT
@@ -40,6 +41,9 @@ def main():
         data = set_train if args.mode == "train" else (set_val if args.mode == "val" else set_test)
         if args.graph_type == "base":
             graph = BaseGraph(data, args).build()
+            print_graph_stats(graph)
+        elif args.graph_type == "heteroNew":
+            graph = HeteroNewGraph(data, args).build()
             print_graph_stats(graph)
         else:
             print(args.graph_type)
