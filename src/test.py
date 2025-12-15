@@ -28,6 +28,15 @@ def test(
     device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
 
+    if args.mode == "val":
+        eval_mask = graph["flight"].val_mask
+    elif args.mode == "test":
+        eval_mask = graph["flight"].test_mask
+    else:
+        raise ValueError(f"Invalid mode for testing: {args.mode}")
+
+    eval_nodes = eval_mask.nonzero(as_tuple=False).view(-1)
+
     # Resolve neighbor fanouts similar to train
     fanouts = getattr(args, "neighbor_fanouts", None)
     # infer model depth
@@ -52,8 +61,9 @@ def test(
 
     # Create loader if requested
     if use_neighbor_sampling:
-        num_flights = graph["flight"].x.size(0)
-        input_nodes = ("flight", torch.arange(num_flights))
+        # num_flights = graph["flight"].x.size(0)
+        # input_nodes = ("flight", torch.arange(num_flights))
+        input_nodes = ("flight", eval_nodes)
         loader = NeighborLoader(
             graph,
             num_neighbors=fanouts,
@@ -91,13 +101,13 @@ def test(
         else:
             out = model(graph.x_dict, graph.edge_index_dict)
             if args.prediction_type == "regression":
-                labels = graph["flight"].y.float().squeeze(-1)
-                preds = out.squeeze(-1)
+                labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
+                preds = out.squeeze(-1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = graph["flight"].y.long()
-                preds = torch.argmax(out, dim=1)
+                labels = graph["flight"].y.long()[eval_mask]
+                preds = torch.argmax(out, dim=1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
 

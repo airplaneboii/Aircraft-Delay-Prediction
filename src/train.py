@@ -22,6 +22,9 @@ def train(
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
+    # y = graph["flight"].y.squeeze(-1).cpu()
+    # print("y mean/std:", y.mean().item(), y.std().item(), "min/max:", y.min().item(), y.max().item())
+
     # Define loss function
     if args.prediction_type == "regression":
         #criterion = nn.MSELoss()
@@ -48,8 +51,10 @@ def train(
             fanouts = fanouts[:depth]
 
     if use_neighbor_sampling:
-        num_flights = graph["flight"].x.size(0)
-        input_nodes = ("flight", torch.arange(num_flights))
+        # num_flights = graph["flight"].x.size(0)
+        # input_nodes = ("flight", torch.arange(num_flights))
+        train_nodes = graph["flight"].train_mask.nonzero(as_tuple=False).view(-1)
+        input_nodes = ("flight", train_nodes)
         loader = NeighborLoader(
             graph,
             num_neighbors=fanouts,
@@ -119,13 +124,16 @@ def train(
             logger.debug("epoch %d: full-batch forward done, out shape=%s", epoch+1, tuple(out.shape))
 
             if args.prediction_type == "regression":
-                labels = graph["flight"].y.squeeze(-1).to(device)
-                preds = out.squeeze(-1)
+                # do prediction only on training nodes
+                mask = graph["flight"].train_mask
+                labels = graph["flight"].y.squeeze(-1)[mask].to(device)
+                preds = out.squeeze(-1)[mask]
                 loss = criterion(preds, labels)
                 preds_for_metrics = preds.detach().cpu()
             else:
-                labels = graph["flight"].y.view(-1).long().to(device)
-                logits = out
+                mask = graph["flight"].train_mask
+                labels = graph["flight"].y.view(-1).long()[mask].to(device)
+                logits = out[mask]
                 loss = criterion(logits, labels)
                 preds_for_metrics = torch.argmax(logits.detach().cpu(), dim=1)
 

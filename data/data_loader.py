@@ -27,6 +27,10 @@ def load_data(
         df = df.head(int(max_rows)).reset_index(drop=True)
         print(f"Row cap enabled: using first {int(max_rows)} rows.")
 
+    # Remove cancelled flights for delay prediction
+    if "CANCELLED" in df.columns:
+        df = df[df["CANCELLED"] == 0].reset_index(drop=True)
+
     # Create target column based on task type
     if task_type == "regression":
         if "ARR_DELAY" in df.columns:
@@ -38,6 +42,15 @@ def load_data(
             df["y"] = df["ARR_DEL15"]
         else:
             df["y"] = 0
+
+    # Split data
+    num_data = len(df)
+    i_train = int(num_data * split_dim[0] / 100)
+    i_val = int(num_data * (split_dim[0] + split_dim[1]) / 100)
+
+    train_index = np.arange(0, i_train)
+    val_index = np.arange(i_train, i_val)
+    test_index = np.arange(i_val, num_data)
 
     # --- Normalization: compute mu/sigma on selected columns and normalize dataset ---
     # Determine which columns to normalize:
@@ -53,8 +66,11 @@ def load_data(
             num_cols = []
     norm_stats = {"mu": {}, "sigma": {}}
     if num_cols:
-        mu = df[num_cols].mean()
-        sigma = df[num_cols].std(ddof=0)
+        # compute mu/sigma on training set only
+        train_df = df.iloc[train_index]
+
+        mu = train_df[num_cols].mean()
+        sigma = train_df[num_cols].std(ddof=0)
         # avoid zero std
         sigma_safe = sigma.replace({0: 1.0})
         # apply normalization in-place
@@ -68,14 +84,7 @@ def load_data(
         norm_stats = {"mu": {}, "sigma": {}}
         print("No normalization applied (no valid columns listed in normalize.txt)")
 
-    # Split data
-    num_data = len(df)
-    i_train = int(num_data * split_dim[0] / 100)
-    i_val = int(num_data * (split_dim[0] + split_dim[1]) / 100)
 
-    df_train = df.iloc[:i_train].reset_index(drop=True)
-    df_val = df.iloc[i_train:i_val].reset_index(drop=True)
-    df_test = df.iloc[i_val:].reset_index(drop=True)
 
 #    # for now
 #    dates = df["FL_DATE"].unique().sort_values()
@@ -87,4 +96,4 @@ def load_data(
 #    set_val = df["FL_DATE"].isin(dates_val)
 #    set_test = df["FL_DATE"].isin(dates_test)
 
-    return df_train, df_val, df_test, norm_stats
+    return df, train_index, val_index, test_index, norm_stats

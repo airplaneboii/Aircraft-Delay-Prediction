@@ -56,7 +56,7 @@ class HGT(nn.Module):
             x_dict_new = {}
 
             for nodeType in x_dict:
-                out = out_dict[nodeType]
+                out = out_dict.get(nodeType, None)
                 if out is None:
                     h = x_dict[nodeType]
                 else:

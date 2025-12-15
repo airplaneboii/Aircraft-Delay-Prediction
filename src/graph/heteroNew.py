@@ -14,9 +14,13 @@ class HeteroNewGraph:
         std = x.std(axis=0, keepdims=True) + 1e-6  # prevent division by zero
         return (x - mean) / std
 
-    def __init__(self, df, args):
+    def __init__(self, df, args, train_index, val_index, test_index):
         self.df = df
         self.args = args
+        self.train_index = train_index
+        self.val_index = val_index
+        self.test_index = test_index
+
     
     def hhmm_to_minutes(self, hhmm):
         if pd.isna(hhmm):
@@ -28,9 +32,6 @@ class HeteroNewGraph:
 
     def build(self):
         data = HeteroData()
-
-        # Remove cancelled flights for delay prediction
-        self.df = self.df[self.df["CANCELLED"] == 0].reset_index(drop=True)
 
         # Nodes (Airports, Aircrafts, Airlines, Flights)
         airports = sorted(set(self.df["ORIGIN_AIRPORT_ID"]).union(set(self.df["DEST_AIRPORT_ID"])))
@@ -75,6 +76,7 @@ class HeteroNewGraph:
 
         #Build feature vectors for each airport
         airport_features = []
+        airport_wac = []
         for airport in airports:
             
             # rows of aggregated stats for departures and arrivals from/to this airport
@@ -85,6 +87,9 @@ class HeteroNewGraph:
             avg_taxi_out = dep_row["TAXI_OUT"] if dep_row is not None else 0        # Average taxi out time
             num_of_departures = dep_row["num_of_departures"] if dep_row is not None else 0  # Number of departures
             num_of_arrivals = arr_row["num_of_arrivals"] if arr_row is not None else 0      # Number of arrivals
+            arrivals_avg_distance = arr_row["DISTANCE"] if arr_row is not None else 0      # Average distance of arrivals
+            departures_avg_distance = dep_row["DISTANCE"] if dep_row is not None else 0  # Average distance of departures
+
 
             # One-hot encode WAC
             wac = airport_wac_map.get(airport, None)
@@ -93,19 +98,31 @@ class HeteroNewGraph:
             else:
                 wac_onehot = np.zeros(len(all_wacs))
             
+            # use log scaling for count features to make them less skewed
+            num_of_departures = np.log1p(num_of_departures)
+            num_of_arrivals   = np.log1p(num_of_arrivals)
+
+            
             # Combine all features
             features = [
                 avg_dep_delay,
                 avg_taxi_out,
                 num_of_departures,
-                num_of_arrivals
-            ] + wac_onehot.tolist()
+                num_of_arrivals,
+                arrivals_avg_distance,
+                departures_avg_distance
+            ]
 
             airport_features.append(features)
+            airport_wac.append(wac_onehot)
 
         # Normalize airport features
         airport_arr = np.array(airport_features, dtype=np.float32)
         airport_arr = self.normalize_features(airport_arr)
+        airport_wac = np.vstack(airport_wac).astype(np.float32)
+        airport_arr = np.concatenate([airport_arr, airport_wac], axis=1)
+
+
 
 
         ####### AIRCRAFT FEATURES #############
@@ -275,9 +292,18 @@ class HeteroNewGraph:
         # currently removed cancelled flights from dataset, might change later to
         # support cancellation prediction as well
 
+        # dataset split masks
+        train_mask = torch.zeros(num_flights, dtype=torch.bool)
+        val_mask = torch.zeros(num_flights, dtype=torch.bool)
+        test_mask = torch.zeros(num_flights, dtype=torch.bool)
 
+        train_mask[self.train_index] = True
+        val_mask[self.val_index] = True
+        test_mask[self.test_index] = True
 
-
+        data["flight"].train_mask = train_mask
+        data["flight"].val_mask = val_mask
+        data["flight"].test_mask = test_mask
 
         #label for predicting arrival delays
         data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)

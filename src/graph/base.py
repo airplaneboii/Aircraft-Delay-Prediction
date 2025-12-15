@@ -14,9 +14,12 @@ class BaseGraph:
         std = x.std(axis=0, keepdims=True) + 1e-6  # prevent division by zero
         return (x - mean) / std
 
-    def __init__(self, df, args):
+    def __init__(self, df, args, train_index, val_index, test_index):
         self.df = df
         self.args = args
+        self.train_index = train_index
+        self.val_index = val_index
+        self.test_index = test_index
     
     def hhmm_to_minutes(self, hhmm):
         if pd.isna(hhmm):
@@ -344,6 +347,18 @@ class BaseGraph:
         #         c_dst.append(cause_map[cause])
         # data["flight", "cancelled_because_of", "cause"].edge_index = torch.tensor([c_src, c_dst], dtype=torch.long)
 
+        # dataset split masks
+        train_mask = torch.zeros(num_flights, dtype=torch.bool)
+        val_mask = torch.zeros(num_flights, dtype=torch.bool)
+        test_mask = torch.zeros(num_flights, dtype=torch.bool)
+
+        train_mask[self.train_index] = True
+        val_mask[self.val_index] = True
+        test_mask[self.test_index] = True
+
+        data["flight"].train_mask = train_mask
+        data["flight"].val_mask = val_mask
+        data["flight"].test_mask = test_mask
 
 
         #label for predicting arrival delays

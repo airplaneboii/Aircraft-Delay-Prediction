@@ -36,7 +36,7 @@ def main():
     # Build graph if not loaded
     if graph is None:
         print("Loading data...")
-        set_train, set_val, set_test, norm_stats = load_data(
+        df, train_index, val_index, test_index, norm_stats = load_data(
             args.data_path,
             mode=args.mode,
             task_type=args.prediction_type,
@@ -46,12 +46,11 @@ def main():
         # attach normalization stats to args for downstream use/printing
         setattr(args, "norm_stats", norm_stats)
         print("Building graph...")
-        data = set_train if args.mode == "train" else (set_val if args.mode == "val" else set_test)
         if args.graph_type == "base":
-            graph = BaseGraph(data, args).build()
+            graph = BaseGraph(df, args, train_index, val_index, test_index).build()
             print_graph_stats(graph)
         elif args.graph_type == "heteroNew":
-            graph = HeteroNewGraph(data, args).build()
+            graph = HeteroNewGraph(df, args, train_index, val_index, test_index).build()
             print_graph_stats(graph)
         else:
             print(args.graph_type)
