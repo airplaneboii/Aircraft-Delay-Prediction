@@ -190,9 +190,9 @@ def test(
                 # unnormalize and convert back to torch tensors for metrics
                 labels_unnorm = torch.from_numpy((labels_cat.cpu().numpy() * sigma + mu)).to(labels_cat.device)
                 preds_unnorm = torch.from_numpy((preds_cat.cpu().numpy() * sigma + mu)).to(preds_cat.device)
-                metrics_results = regression_metrics(labels_unnorm, preds_unnorm)
+                metrics_results = regression_metrics(labels_unnorm, preds_unnorm, args.norm_stats)
             else:
-                metrics_results = regression_metrics(labels_cat, preds_cat)
+                metrics_results = regression_metrics(labels_cat, preds_cat, args.norm_stats)
 
             metrics_str = (
                 f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "

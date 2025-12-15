@@ -44,11 +44,18 @@ def ensure_dir(
 ###################### EVALUATION METRICS ######################
 def regression_metrics(
         y_true: torch.Tensor,
-        y_pred: torch.Tensor
+        y_pred: torch.Tensor,
+        norm_stats: dict = None
         ) -> dict:
 
     y_pred_np = y_pred.detach().cpu().numpy()
     y_true_np = y_true.detach().cpu().numpy()
+
+    if norm_stats is not None:
+        mu = norm_stats["mu"]["ARR_DELAY"]
+        sigma = norm_stats["sigma"]["ARR_DELAY"]
+        y_pred_np = (y_pred_np * sigma) + mu
+        y_true_np = (y_true_np * sigma) + mu
 
     mse = mean_squared_error(y_true_np, y_pred_np)
     rmse = mse ** 0.5

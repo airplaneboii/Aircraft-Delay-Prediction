@@ -17,6 +17,7 @@ def train(
         graph,
         args
     ) -> None:
+    print(args)
     # Set model to training mode
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -142,7 +143,7 @@ def train(
 
         # Compute metrics for monitoring
         if args.prediction_type == "regression":
-            metrics_results = regression_metrics(labels_cat, preds_cat)
+            metrics_results = regression_metrics(labels_cat, preds_cat, args.norm_stats)
             metrics_str = (
                 f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
                 f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
