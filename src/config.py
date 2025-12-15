@@ -5,7 +5,8 @@ import glob
 # Default values for CLI
 DEFAULT_MODE = "train"
 DEFAULT_GRAPH_TYPE = "base"
-DEFAULT_MODEL_TYPE = "hgtmodel"
+DEFAULT_MODEL_TYPE = "none"
+DEFAULT_MODEL_FILENAME = None
 DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
@@ -46,8 +47,8 @@ def get_args():
     # General
     parser.add_argument("-m", "--mode", type=str, choices=["train", "val", "test"], default=DEFAULT_MODE,
                         help=f"Mode of operation (default: {DEFAULT_MODE})")
-    parser.add_argument("-d", "--development", action="store_true",
-                        help=f"Toggle development mode with smaller dataset ONLY for quick code testing")    
+    parser.add_argument("--rows", type=int, default=None,
+                        help="Optional: limit the number of rows to load from the CSV (for quick tests).")    
     
     # Graphs and graph parameters 
     parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew"], default=DEFAULT_GRAPH_TYPE,
@@ -68,6 +69,8 @@ def get_args():
                         help=f"Directory to save or load graphs (default: {DEFAULT_GRAPH_DIR})")
     parser.add_argument("-M", "--model_dir", type=str, default=DEFAULT_MODEL_DIR,
                         help=f"Directory to save or load models (default: {DEFAULT_MODEL_DIR})")    
+    parser.add_argument("-F", "--model_file", type=str, default=DEFAULT_MODEL_FILENAME,
+                        help=f"Filename (without extension) to save or load the model (default: model name)")
     
     # Training parameters
     parser.add_argument("-e", "--epochs", type=int, default=DEFAULT_EPOCHS,
@@ -118,6 +121,18 @@ def get_args():
     # Normalize neighbor fanouts: allow None to mean full-neighbor sampling
     if isinstance(args.neighbor_fanouts, str):
         args.neighbor_fanouts = parse_fanouts(args.neighbor_fanouts)
+
+    # Derive default model filename: prefer provided graph filename (save first, then load)
+    # otherwise fall back to the graph type. Do not override if user explicitly set model_file.
+    if not args.model_file:
+        graph_basename = None
+        if getattr(args, "save_graph", None):
+            graph_basename = os.path.splitext(os.path.basename(args.save_graph))[0]
+        elif getattr(args, "load_graph", None):
+            graph_basename = os.path.splitext(os.path.basename(args.load_graph))[0]
+        else:
+            graph_basename = args.graph_type
+        args.model_file = f"{args.model_type}_{graph_basename}"
 
     # If data_path is not provided or points to a directory, auto-select the latest CSV in that directory
     # Treat empty string as not provided (useful for YAML configs that set data_path: "").

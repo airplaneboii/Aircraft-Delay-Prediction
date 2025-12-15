@@ -131,6 +131,19 @@ def clean_chunk(chunk, essential_cols=None):
             if dropped:
                 tqdm.write(f"{Fore.YELLOW}Dropped {dropped} rows missing essential columns{Style.RESET_ALL}")
     
+    # Replace negative arrival delay (ARR_DELAY) values with 0 if present
+    #if "ARR_DELAY" in chunk.columns:
+    #    try:
+    #        arr_num = pd.to_numeric(chunk["ARR_DELAY"], errors="coerce")
+    #        neg_mask = arr_num < 0
+    #        neg_count = int(neg_mask.sum())
+    #        if neg_count:
+    #            # set negative ARR_DELAY entries to 0 (preserve row)
+    #            chunk.loc[neg_mask, "ARR_DELAY"] = 0
+    #            tqdm.write(f"{Fore.YELLOW}Set {neg_count} negative ARR_DELAY values to 0{Style.RESET_ALL}")
+    #    except Exception:
+    #        pass
+    
     # Fill all remaining NaNs with 0 in one operation
     chunk = chunk.fillna(0)
     

@@ -36,7 +36,15 @@ def main():
     # Build graph if not loaded
     if graph is None:
         print("Loading data...")
-        set_train, set_val, set_test = load_data(args.data_path, mode=args.mode, task_type=args.prediction_type, development=args.development)
+        set_train, set_val, set_test, norm_stats = load_data(
+            args.data_path,
+            mode=args.mode,
+            task_type=args.prediction_type,
+            max_rows=getattr(args, "rows", None),
+            normalize_cols_file="data/normalize.txt",
+        )
+        # attach normalization stats to args for downstream use/printing
+        setattr(args, "norm_stats", norm_stats)
         print("Building graph...")
         data = set_train if args.mode == "train" else (set_val if args.mode == "val" else set_test)
         if args.graph_type == "base":
@@ -118,14 +126,43 @@ def main():
     else:
         raise ValueError("Unsupported model type.")
 
-    # Run mode
+    # Determine model file path (allow user-provided filename without extension)
+    model_basename = getattr(args, "model_file", None) or args.model_type
+    model_filename = model_basename if model_basename.endswith(".pt") else f"{model_basename}.pt"
+    model_path = os.path.join(args.model_dir, model_filename)
+
     if args.mode == "develop":
         print(graph)
     elif args.mode == "train":
         train(model, graph, args)
-        torch.save(model.state_dict(), f"{args.model_dir}/{args.model_type}.pt")
+        print(f"Saving model to {model_path}...")
+        # Save model state plus normalization stats (if present) for reproducible inference
+        save_obj = {"model_state_dict": model.state_dict()}
+        try:
+            norm_stats = getattr(args, "norm_stats", None)
+            if norm_stats:
+                save_obj["norm_stats"] = norm_stats
+        except Exception:
+            pass
+        torch.save(save_obj, model_path)
     elif args.mode == "test" or args.mode == "val":
-        model.load_state_dict(torch.load(f"{args.model_dir}/{args.model_type}.pt"))
+        if os.path.exists(model_path):
+            print(f"Loading model from {model_path}...")
+            loaded = torch.load(model_path)
+            # Backwards compatible: file may contain only a state_dict
+            if isinstance(loaded, dict) and "model_state_dict" in loaded:
+                model.load_state_dict(loaded["model_state_dict"])
+                # restore normalization stats if saved with the model
+                if "norm_stats" in loaded:
+                    try:
+                        setattr(args, "norm_stats", loaded["norm_stats"])
+                        print("Restored normalization stats from model file.")
+                    except Exception:
+                        pass
+            else:
+                model.load_state_dict(loaded)
+        else:
+            raise FileNotFoundError(f"Model file not found: {model_path}")
         test(model, graph, args)
 
 if __name__ == "__main__":

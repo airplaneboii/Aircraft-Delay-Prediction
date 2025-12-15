@@ -1,12 +1,13 @@
 # Default configuration values mirroring src/config.py
 mode: train
-development: false
+rows: null
 graph_type: base
 save_graph: ""
 load_graph: ""
 time_window: 6
-model_type: hgtmodel
+model_type: none
 data_path: data/datasets/
+model_file: ""
 graph_dir: src/graph/
 model_dir: src/models/
 epochs: 50

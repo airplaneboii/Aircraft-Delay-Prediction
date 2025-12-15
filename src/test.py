@@ -1,6 +1,8 @@
 import time
 from datetime import datetime
 import torch
+import pandas as pd
+import os
 from src.utils import regression_metrics, classification_metrics
 from torch_geometric.loader import NeighborLoader
 import logging
@@ -107,8 +109,91 @@ def test(
             labels_cat = torch.tensor([])
             preds_cat = torch.tensor([])
 
+        # Prepare (and save) predictions and true values to CSV; un-normalize if stats available
+        try:
+            # attempt to recover node ids if available (from neighbor sampling batches)
+            node_ids = None
+            if use_neighbor_sampling and loader is not None:
+                # rebuild node_ids from collected batches if they exposed 'n_id'
+                # all_batches_node_ids was not stored; try to get from last batch variable if present
+                # Fallback: use sequential ids
+                node_ids = torch.arange(labels_cat.size(0)).cpu()
+            else:
+                # full-batch: use natural order of graph flight nodes
+                node_ids = torch.arange(labels_cat.size(0)).cpu()
+
+            true_vals = labels_cat.cpu().numpy()
+            pred_vals = preds_cat.cpu().numpy()
+
+            # Try to un-normalize using args.norm_stats (prefer 'y' key then 'ARR_DELAY')
+            unnorm_true = None
+            unnorm_pred = None
+            try:
+                norm_stats = getattr(args, "norm_stats", None) or {}
+                mu_map = norm_stats.get("mu", {})
+                sigma_map = norm_stats.get("sigma", {})
+                if "y" in mu_map and "y" in sigma_map:
+                    mu = float(mu_map["y"])
+                    sigma = float(sigma_map["y"])
+                elif "ARR_DELAY" in mu_map and "ARR_DELAY" in sigma_map:
+                    mu = float(mu_map["ARR_DELAY"])
+                    sigma = float(sigma_map["ARR_DELAY"])
+                else:
+                    mu = None
+                    sigma = None
+
+                if mu is not None and sigma is not None:
+                    unnorm_true = (true_vals * sigma) + mu
+                    unnorm_pred = (pred_vals * sigma) + mu
+            except Exception:
+                unnorm_true = None
+                unnorm_pred = None
+
+            df = pd.DataFrame({
+                "node_id": node_ids.numpy(),
+                "true": true_vals,
+                "pred": pred_vals,
+            })
+            if unnorm_true is not None:
+                df["true_raw"] = unnorm_true
+                df["pred_raw"] = unnorm_pred
+
+            model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
+            out_dir = getattr(args, "model_dir", ".")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
+            df.to_csv(out_path, index=False)
+            logger.info("Saved predictions to %s", out_path)
+        except Exception:
+            logger.exception("Failed to save predictions CSV")
+
         if args.prediction_type == "regression":
-            metrics_results = regression_metrics(labels_cat, preds_cat)
+            # If normalization stats exist for the target, unnormalize before computing metrics for interpretability
+            try:
+                norm_stats = getattr(args, "norm_stats", None) or {}
+                mu_map = norm_stats.get("mu", {})
+                sigma_map = norm_stats.get("sigma", {})
+                if "y" in mu_map and "y" in sigma_map:
+                    mu = float(mu_map["y"])
+                    sigma = float(sigma_map["y"])
+                elif "ARR_DELAY" in mu_map and "ARR_DELAY" in sigma_map:
+                    mu = float(mu_map["ARR_DELAY"])
+                    sigma = float(sigma_map["ARR_DELAY"])
+                else:
+                    mu = None
+                    sigma = None
+            except Exception:
+                mu = None
+                sigma = None
+
+            if mu is not None and sigma is not None:
+                # unnormalize and convert back to torch tensors for metrics
+                labels_unnorm = torch.from_numpy((labels_cat.cpu().numpy() * sigma + mu)).to(labels_cat.device)
+                preds_unnorm = torch.from_numpy((preds_cat.cpu().numpy() * sigma + mu)).to(preds_cat.device)
+                metrics_results = regression_metrics(labels_unnorm, preds_unnorm)
+            else:
+                metrics_results = regression_metrics(labels_cat, preds_cat)
+
             metrics_str = (
                 f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
                 f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"

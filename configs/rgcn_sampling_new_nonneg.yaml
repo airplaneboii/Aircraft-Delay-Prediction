@@ -1,0 +1,20 @@
+# Example config file, it trains a RGCN with sampling
+# It loads the graph from disk, then samples it with batch size 500k and fanout 30,20; 
+# This config demands ~6000MB of VRAM. Other settings match defaults.
+mode: train
+rows: null
+graph_type: heteroNew
+save_graph: "new12m_nonneg.pt"
+load_graph: ""
+model_type: rgcnmodel
+model_file: rgcn_new12m_nonneg
+data_path: data/datasets/12M_nonneg_20251214_223157.csv
+graph_dir: src/graph/
+model_dir: src/models/
+epochs: 50
+lr: 0.001
+prediction_type: regression
+batch_size: 600000
+neighbor_sampling: true
+neighbor_fanouts: "30,20"
+verbosity: 1

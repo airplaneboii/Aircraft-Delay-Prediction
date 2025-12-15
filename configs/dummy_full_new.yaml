@@ -1,0 +1,22 @@
+# Dummy model example (full-batch, no neighbor sampling)
+# Leave `data_path` blank to rely on auto-selection or pass `--data_path` on CLI
+mode: train
+rows: null
+graph_type: heteroNew
+save_graph: ""
+load_graph: "new12m.pt"
+model_type: dummymodel
+data_path: ""
+graph_dir: src/graph/
+model_dir: src/models/
+model_file: dummy_new12m
+epochs: 50
+lr: 0.001
+prediction_type: regression
+neighbor_sampling: false
+neighbor_fanouts: ""
+verbosity: 1
+
+# Notes:
+# - This config demonstrates running the lightweight `dummymodel` on the full graph (no sampling).
+# - Use `python main.py -c configs/dummy_nosample.yaml --data_path path/to/your.csv` to run.
