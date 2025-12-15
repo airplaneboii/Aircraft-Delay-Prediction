@@ -131,9 +131,7 @@ def main():
     model_filename = model_basename if model_basename.endswith(".pt") else f"{model_basename}.pt"
     model_path = os.path.join(args.model_dir, model_filename)
 
-    if args.mode == "develop":
-        print(graph)
-    elif args.mode == "train":
+    if args.mode == "train":
         train(model, graph, args)
         print(f"Saving model to {model_path}...")
         # Save model state plus normalization stats (if present) for reproducible inference
