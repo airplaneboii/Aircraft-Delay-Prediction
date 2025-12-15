@@ -20,11 +20,13 @@ def train(
     print(args)
     # Set model to training mode
     model.train()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # Define loss function
     if args.prediction_type == "regression":
-        criterion = nn.MSELoss()
+        #criterion = nn.MSELoss()
+        #criterion = nn.SmoothL1Loss()
+        criterion = nn.L1Loss()
     else:
         criterion = nn.CrossEntropyLoss()
 
@@ -102,6 +104,7 @@ def train(
 
                 logger.debug("epoch %d batch %d: loss computed %.6f", epoch+1, batch_idx, loss.item())
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 logger.debug("epoch %d batch %d: backward done", epoch+1, batch_idx)
                 optimizer.step()
                 logger.debug("epoch %d batch %d: optimizer step done", epoch+1, batch_idx)

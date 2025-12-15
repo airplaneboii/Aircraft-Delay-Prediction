@@ -4,15 +4,16 @@ import glob
 
 # Default values for CLI
 DEFAULT_MODE = "train"
-DEFAULT_GRAPH_TYPE = "base"
-DEFAULT_MODEL_TYPE = "none"
+DEFAULT_GRAPH_TYPE = "heteroNew"#"base"
+DEFAULT_MODEL_TYPE = "rgcnmodel"#"none"
 DEFAULT_MODEL_FILENAME = None
 DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
 DEFAULT_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 100000
-DEFAULT_LR = 0.001
+DEFAULT_LR = 1e-2
+DEFAULT_WEIGHT_DECAY = 1e-4
 DEFAULT_PREDICTION_TYPE = "regression"
 DEFAULT_TIME_WINDOW = 6
 DEFAULT_NEIGHBOR_SAMPLING = False
@@ -52,7 +53,7 @@ def get_args():
     
     # Graphs and graph parameters 
     parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew"], default=DEFAULT_GRAPH_TYPE,
-                        help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")   #TODO: Add more graph types when implemented
+                        help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=None,
                         help="Filename to save the built graph to (e.g., 'graph.pt'; default: None, don't save)")
     parser.add_argument("-l", "--load_graph", type=str, default=None,
@@ -77,6 +78,8 @@ def get_args():
                         help=f"Number of training epochs (default: {DEFAULT_EPOCHS})")
     parser.add_argument("-r", "--lr", type=float, default=DEFAULT_LR,
                         help=f"Learning rate for the optimizer (default: {DEFAULT_LR})")
+    parser.add_argument("-a", "--weight_decay", type=float, default=DEFAULT_WEIGHT_DECAY,
+                        help=f"Weight decay (L2 regularization) for the optimizer (default: {DEFAULT_WEIGHT_DECAY})")
     parser.add_argument("-p", "--prediction_type", type=str, choices=["regression", "classification"],
                         default=DEFAULT_PREDICTION_TYPE, help=f"Type of prediction task (default: {DEFAULT_PREDICTION_TYPE})")
     parser.add_argument("-b", "--batch_size", type=int, default=DEFAULT_BATCH_SIZE,
