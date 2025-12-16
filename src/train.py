@@ -27,9 +27,14 @@ def train(
 
     # Define loss function
     if args.prediction_type == "regression":
-        #criterion = nn.MSELoss()
-        #criterion = nn.SmoothL1Loss()
-        criterion = nn.L1Loss()
+        if args.criterion == "mse":
+            criterion = nn.MSELoss()
+        elif args.criterion == "huber":
+            criterion = nn.SmoothL1Loss()
+        elif args.criterion == "l1":
+            criterion = nn.L1Loss()
+        else:
+            raise ValueError(f"Unknown regression criterion: {args.criterion}")
     else:
         criterion = nn.CrossEntropyLoss()
 

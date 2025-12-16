@@ -11,7 +11,7 @@ DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
 DEFAULT_EPOCHS = 50
-DEFAULT_BATCH_SIZE = 100000
+DEFAULT_BATCH_SIZE = 131072
 DEFAULT_LR = 1e-2
 DEFAULT_WEIGHT_DECAY = 1e-4
 DEFAULT_PREDICTION_TYPE = "regression"
@@ -19,6 +19,7 @@ DEFAULT_TIME_WINDOW = 6
 DEFAULT_NEIGHBOR_SAMPLING = False
 DEFAULT_NEIGHBOR_FANOUTS = "15,10"
 DEFAULT_VERBOSITY_LEVEL = 1
+DEFAULT_CRITERION = "huber"
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -72,6 +73,8 @@ def get_args():
                         help=f"Directory to save or load models (default: {DEFAULT_MODEL_DIR})")    
     parser.add_argument("-F", "--model_file", type=str, default=DEFAULT_MODEL_FILENAME,
                         help=f"Filename (without extension) to save or load the model (default: model name)")
+    parser.add_argument("--criterion", type=str, choices=["mse", "huber", "l1"], default=DEFAULT_CRITERION,
+                        help="Loss criterion to use for training (default: l1)")
     
     # Training parameters
     parser.add_argument("-e", "--epochs", type=int, default=DEFAULT_EPOCHS,
