@@ -154,7 +154,8 @@ def train(
 
         # Compute metrics for monitoring
         if args.prediction_type == "regression":
-            metrics_results = regression_metrics(labels_cat, preds_cat, args.norm_stats)
+            norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None)
+            metrics_results = regression_metrics(labels_cat, preds_cat, norm_stats)
             metrics_str = (
                 f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
                 f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"

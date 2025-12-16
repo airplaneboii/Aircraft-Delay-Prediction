@@ -14,12 +14,13 @@ class BaseGraph:
         std = x.std(axis=0, keepdims=True) + 1e-6  # prevent division by zero
         return (x - mean) / std
 
-    def __init__(self, df, args, train_index, val_index, test_index):
+    def __init__(self, df, args, train_index, val_index, test_index, norm_stats=None):
         self.df = df
         self.args = args
         self.train_index = train_index
         self.val_index = val_index
         self.test_index = test_index
+        self.norm_stats = norm_stats
     
     def hhmm_to_minutes(self, hhmm):
         if pd.isna(hhmm):
@@ -363,4 +364,17 @@ class BaseGraph:
 
         #label for predicting arrival delays
         data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)
+
+        # Attach metadata so the graph object is self-contained when saved/loaded
+        try:
+            data.norm_stats = self.norm_stats
+        except Exception:
+            pass
+        try:
+            data.train_index = self.train_index
+            data.val_index = self.val_index
+            data.test_index = self.test_index
+        except Exception:
+            pass
+
         return data

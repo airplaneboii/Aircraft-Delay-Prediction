@@ -4,7 +4,7 @@ from torch_geometric.data import HeteroData
 from sklearn.preprocessing import OneHotEncoder
 import pandas as pd
 
-class HeteroNewGraph:
+class HeteroNewGraph2:
 
     # Normalizes features by removing NaNs and scaling to zero mean and unit variance
     def normalize_features(self, x):
@@ -262,15 +262,23 @@ class HeteroNewGraph:
 
         # Edge 1: flight originates from airport
         data["flight", "originates_from", "airport"].edge_index = torch.tensor([flight_index, origin], dtype=torch.long)
+        # Reverse edge: airport has departing flights
+        data["airport", "has_departure", "flight"].edge_index = torch.tensor([origin, flight_index], dtype=torch.long)
 
         # Edge 2: flight arrives at airport
         data["flight", "arrives_at", "airport"].edge_index = torch.tensor([flight_index, dest], dtype=torch.long)
+        # Reverse edge: airport has arriving flights
+        data["airport", "has_arrival", "flight"].edge_index = torch.tensor([dest, flight_index], dtype=torch.long)
 
         # Edge 3: flight operated by airline
         data["flight", "operated_by", "airline"].edge_index = torch.tensor([flight_index, airline], dtype=torch.long)
+        # Reverse edge: airline operates flights
+        data["airline", "operates", "flight"].edge_index = torch.tensor([airline, flight_index], dtype=torch.long)
 
         # Edge 4: flight performed by aircraft
         data["flight", "performed_by", "aircraft"].edge_index = torch.tensor([flight_index, aircraft], dtype=torch.long)
+        # Reverse edge: aircraft performs flights
+        data["aircraft", "performs", "flight"].edge_index = torch.tensor([aircraft, flight_index], dtype=torch.long)
 
         # Edge 5: flight 1 performed by aircraft that later performs flight 2 (temporal link)
         next_src = []
@@ -284,7 +292,7 @@ class HeteroNewGraph:
                 next_src.append(idx_list[i])
                 next_dst.append(idx_list[i + 1])
 
-        data["flight", "next_same_aircraft", "flight"].edge_index = torch.tensor([next_src, next_dst], dtype=torch.long)
+        #data["flight", "next_same_aircraft", "flight"].edge_index = torch.tensor([next_src, next_dst], dtype=torch.long)
 
         # Edge 6: flight delayed because of cause
         # removed so that no label leakage occurs, as causes are only known after delay happens
@@ -309,7 +317,7 @@ class HeteroNewGraph:
         #label for predicting arrival delays
         data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)
 
-        # store normalization stats and split indexes on the HeteroData for persistence
+        # Attach norm_stats and split indexes so the graph is self-contained when saved
         try:
             data.norm_stats = self.norm_stats
         except Exception:

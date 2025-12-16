@@ -52,7 +52,7 @@ def get_args():
                         help="Optional: limit the number of rows to load from the CSV (for quick tests).")    
     
     # Graphs and graph parameters 
-    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew"], default=DEFAULT_GRAPH_TYPE,
+    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew", "heteroNew2"], default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=None,
                         help="Filename to save the built graph to (e.g., 'graph.pt'; default: None, don't save)")
@@ -62,7 +62,7 @@ def get_args():
                         help=f"Time window (hours) for temporal edges (default: {DEFAULT_TIME_WINDOW})")
     
     # Available models
-    parser.add_argument("-t", "--model_type", type=str, choices=["none", "dummymodel", "rgcnmodel", "hgtmodel", "heterosage"],
+    parser.add_argument("-t", "--model_type", type=str, choices=["none", "dummymodel", "rgcnmodel", "rgcn_norelu", "hgtmodel", "heterosage"],
                         default=DEFAULT_MODEL_TYPE, help=f"Type of model to use (default: {DEFAULT_MODEL_TYPE})")
     parser.add_argument("-D", "--data_path", type=str, default=DEFAULT_DATA_PATH,
                         help=f"Path to a specific dataset file (default: auto-select latest from {DEFAULT_DATA_PATH})")

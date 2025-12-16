@@ -10,13 +10,16 @@ def load_data(
     max_rows: int | None = None,
     split_dim: tuple[int, int, int] = (80, 10, 10),
     normalize_cols_file: str | None = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+    ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, dict]:
     """Load the merged CSV into a DataFrame.
 
     Note: Data cleaning (dropping rows with missing essential fields and filling non-essential numeric NaNs) 
     should be performed during merging to save time when running multiple tests.
     This loader only reads the CSV and applies a development row cap.
     Eventually some data processing and conversion that can't be stored in a CSV can be done here.
+
+    Returns:
+        (df, train_index, val_index, test_index, norm_stats)
     """
 
     # Read CSV
@@ -66,11 +69,8 @@ def load_data(
             num_cols = []
     norm_stats = {"mu": {}, "sigma": {}}
     if num_cols:
-        # compute mu/sigma on training set only
-        train_df = df.iloc[train_index]
-
-        mu = train_df[num_cols].mean()
-        sigma = train_df[num_cols].std(ddof=0)
+        mu = df[num_cols].mean()
+        sigma = df[num_cols].std(ddof=0)
         # avoid zero std
         sigma_safe = sigma.replace({0: 1.0})
         # apply normalization in-place

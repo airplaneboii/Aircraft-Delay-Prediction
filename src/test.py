@@ -139,7 +139,7 @@ def test(
             unnorm_true = None
             unnorm_pred = None
             try:
-                norm_stats = getattr(args, "norm_stats", None) or {}
+                norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None) or {}
                 mu_map = norm_stats.get("mu", {})
                 sigma_map = norm_stats.get("sigma", {})
                 if "y" in mu_map and "y" in sigma_map:
@@ -180,7 +180,7 @@ def test(
         if args.prediction_type == "regression":
             # If normalization stats exist for the target, unnormalize before computing metrics for interpretability
             try:
-                norm_stats = getattr(args, "norm_stats", None) or {}
+                norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None) or {}
                 mu_map = norm_stats.get("mu", {})
                 sigma_map = norm_stats.get("sigma", {})
                 if "y" in mu_map and "y" in sigma_map:
@@ -202,7 +202,7 @@ def test(
                 #preds_unnorm = torch.from_numpy((preds_cat.cpu().numpy() * sigma + mu)).to(preds_cat.device)
             #    metrics_results = regression_metrics(labels_unnorm, preds_unnorm, args.norm_stats)
             #else:
-            metrics_results = regression_metrics(labels_cat, preds_cat, args.norm_stats)
+            metrics_results = regression_metrics(labels_cat, preds_cat, norm_stats)
 
             metrics_str = (
                 f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "

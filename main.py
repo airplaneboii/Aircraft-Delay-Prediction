@@ -1,10 +1,12 @@
 from src.config import get_args
 from src.graph.base import BaseGraph
 from src.graph.heteroNew import HeteroNewGraph
+from src.graph.heteroNew2 import HeteroNewGraph2
 from src.models.dummymodel import DummyModel
 from src.models.heterosage import HeteroSAGE
 from src.models.hgtmodel import HGT
 from src.models.rgcnmodel import RGCN
+from src.models.rgcn_norelu import RGCN as RGCNNoReLU
 from src.train import train
 from src.test import test
 from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats
@@ -47,10 +49,13 @@ def main():
         setattr(args, "norm_stats", norm_stats)
         print("Building graph...")
         if args.graph_type == "base":
-            graph = BaseGraph(df, args, train_index, val_index, test_index).build()
+            graph = BaseGraph(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
         elif args.graph_type == "heteroNew":
-            graph = HeteroNewGraph(df, args, train_index, val_index, test_index).build()
+            graph = HeteroNewGraph(df, args, train_index, val_index, test_index, norm_stats).build()
+            print_graph_stats(graph)
+        elif args.graph_type == "heteroNew2":
+            graph = HeteroNewGraph2(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
         else:
             print(args.graph_type)
@@ -108,6 +113,17 @@ def main():
             hidden_channels=64,
             out_channels=out_channels,
             num_layers=2,
+            dropout=0.2,
+        ).to(device)
+    elif args.model_type == "rgcn_norelu":
+        print("Using model: rgcn_norelu")
+        out_channels = 2 if args.prediction_type == "classification" else 1
+        model = RGCNNoReLU(
+            metadata=metadata,
+            in_channels_dict=in_channels_dict,
+            hidden_channels=128,
+            out_channels=out_channels,
+            num_layers=4,
             dropout=0.2,
         ).to(device)
     elif args.model_type == "hgtmodel":
