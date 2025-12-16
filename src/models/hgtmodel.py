@@ -7,6 +7,7 @@ from typing import Dict
 class HGT(nn.Module):
     def __init__(self, metadata, in_channels_dict, hidden_channels=64, out_channels=1, num_layers=2, num_heads=2, dropout=0.2):
         super().__init__()
+        self.num_layers = num_layers
         self.metadata = metadata
         self.node_types, self.edge_types = metadata
         self.dropout = nn.Dropout(dropout)

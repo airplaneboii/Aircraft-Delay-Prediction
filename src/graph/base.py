@@ -21,6 +21,7 @@ class BaseGraph:
         self.val_index = val_index
         self.test_index = test_index
         self.norm_stats = norm_stats
+
     
     def hhmm_to_minutes(self, hhmm):
         if pd.isna(hhmm):
@@ -33,39 +34,33 @@ class BaseGraph:
     def build(self):
         data = HeteroData()
 
-        # Remove cancelled flights for delay prediction
-        self.df = self.df[self.df["CANCELLED"] == 0].reset_index(drop=True)
-
-        # Nodes (Airports, Aircrafts, Airlines, Causes, Flights)
+        # Nodes (Airports, Aircrafts, Airlines, Flights)
         airports = sorted(set(self.df["ORIGIN_AIRPORT_ID"]).union(set(self.df["DEST_AIRPORT_ID"])))
         aircrafts = sorted(self.df["TAIL_NUM"].unique())
-        airlines = sorted(self.df["OP_CARRIER_AIRLINE_ID"].unique()) # ALTERNATIVE: parse unique values from lookup tables instead
-        causes = ["CARRIER", "WEATHER", "NAS", "SECURITY", "LATE_AIRCRAFT"]
+        airlines = sorted(self.df["OP_CARRIER_AIRLINE_ID"].unique())
 
         airport_map = {a: i for i, a in enumerate(airports)}
         aircraft_map = {a: i for i, a in enumerate(aircrafts)}
         airline_map = {a: i for i, a in enumerate(airlines)}
-        cause_map = {c: i for i, c in enumerate(causes)}
 
         self.df['FL_DATE'] = pd.to_datetime(self.df[['YEAR', 'MONTH', 'DAY_OF_MONTH']].rename(columns={'YEAR': 'year', 'MONTH': 'month', 'DAY_OF_MONTH': 'day'}))
 
+        # train_df for computing features only on training data
+        train_df = self.df.iloc[self.train_index]
 
         ######### AIRPORT FEATURES ############
 
 
         # features based on origin airport 
-        origin_features = self.df.groupby("ORIGIN_AIRPORT_ID").agg({
+        origin_features = train_df.groupby("ORIGIN_AIRPORT_ID").agg({
             "DEP_DELAY" : "mean",   # Average departure delay from this airport
             "TAXI_OUT" : "mean",    # Average taxi out time
             "DISTANCE" : "mean",    # Average distance of flights from this airport
-            "CANCELLED" : "mean",   # Cancellation rate for departures
             "ORIGIN_AIRPORT_ID" : "count"      # Number of departures
         }).rename(columns={"ORIGIN_AIRPORT_ID": "num_of_departures"})  #renaming for clarity
 
         # features based on destination airport
-        dest_features = self.df.groupby("DEST_AIRPORT_ID").agg({
-            # "ARR_DELAY" : "mean",    # Average arrival delay to this airport, removed to avoid label leakage
-            # "TAXI_IN" : "mean",      # Average taxi in time, removed to avoid label leakage
+        dest_features = train_df.groupby("DEST_AIRPORT_ID").agg({
             "DISTANCE" : "mean",     # Average distance of flights to this airport
             "DEST_AIRPORT_ID" : "count"         # Number of arrivals
         }).rename(columns={"DEST_AIRPORT_ID": "num_of_arrivals"})  #renaming for clarity
@@ -73,17 +68,18 @@ class BaseGraph:
         # one-hot encoding categorical features (WACs - World Area Codes)
 
         # get all unique WACs
-        all_wacs = sorted(self.df["ORIGIN_WAC"].dropna().unique())
+        all_wacs = sorted(train_df["ORIGIN_WAC"].dropna().unique())
         
         # create one-hot encoder that will produce a one-hot vector for each WAC
         wac_encoder = OneHotEncoder(categories=[all_wacs], sparse_output=False, handle_unknown='ignore')
         wac_encoder.fit(np.array(all_wacs).reshape(-1, 1))  # fit encoder on all unique WACs
         airport_wac_map = (
-            self.df.drop_duplicates("ORIGIN_AIRPORT_ID").set_index("ORIGIN_AIRPORT_ID")["ORIGIN_WAC"].to_dict()
+            train_df.drop_duplicates("ORIGIN_AIRPORT_ID").set_index("ORIGIN_AIRPORT_ID")["ORIGIN_WAC"].to_dict()
         )
 
         #Build feature vectors for each airport
         airport_features = []
+        airport_wac = []
         for airport in airports:
             
             # rows of aggregated stats for departures and arrivals from/to this airport
@@ -91,11 +87,12 @@ class BaseGraph:
             arr_row = dest_features.loc[airport] if airport in dest_features.index else None
             
             avg_dep_delay = dep_row["DEP_DELAY"] if dep_row is not None else 0      # Average departure delay
-            # avg_arr_delay = arr_row["ARR_DELAY"] if arr_row is not None else 0      # Average arrival delay
             avg_taxi_out = dep_row["TAXI_OUT"] if dep_row is not None else 0        # Average taxi out time
-            # avg_taxi_in = arr_row["TAXI_IN"] if arr_row is not None else 0          # Average taxi in time
             num_of_departures = dep_row["num_of_departures"] if dep_row is not None else 0  # Number of departures
             num_of_arrivals = arr_row["num_of_arrivals"] if arr_row is not None else 0      # Number of arrivals
+            arrivals_avg_distance = arr_row["DISTANCE"] if arr_row is not None else 0      # Average distance of arrivals
+            departures_avg_distance = dep_row["DISTANCE"] if dep_row is not None else 0  # Average distance of departures
+
 
             # One-hot encode WAC
             wac = airport_wac_map.get(airport, None)
@@ -104,30 +101,36 @@ class BaseGraph:
             else:
                 wac_onehot = np.zeros(len(all_wacs))
             
+            # use log scaling for count features to make them less skewed
+            num_of_departures = np.log1p(num_of_departures)
+            num_of_arrivals   = np.log1p(num_of_arrivals)
+
+            
             # Combine all features
             features = [
                 avg_dep_delay,
-                # avg_arr_delay,
                 avg_taxi_out,
-                # avg_taxi_in,
                 num_of_departures,
-                num_of_arrivals
-            ] + wac_onehot.tolist()
+                num_of_arrivals,
+                arrivals_avg_distance,
+                departures_avg_distance
+            ]
 
             airport_features.append(features)
+            airport_wac.append(wac_onehot)
 
         # Normalize airport features
         airport_arr = np.array(airport_features, dtype=np.float32)
         airport_arr = self.normalize_features(airport_arr)
+        airport_wac = np.vstack(airport_wac).astype(np.float32)
+        airport_arr = np.concatenate([airport_arr, airport_wac], axis=1)
 
 
         ####### AIRCRAFT FEATURES #############
 
 
-        aircraft_grp = self.df.groupby("TAIL_NUM").agg({
+        aircraft_grp = train_df.groupby("TAIL_NUM").agg({
             "DEP_DELAY": "mean",              # Average departure delay for this aircraft
-            # "ARR_DELAY": "mean",              # Average arrival delay, removed to avoid label leakage
-            # "CANCELLED": "mean",              # Cancellation rate
             "DISTANCE": "mean",               # Average flight distance for this aircraft
             "CRS_ELAPSED_TIME": "mean",    # Average block time (makes / model differences)
             "TAIL_NUM": "count"               # Number of flights for this aircraft
@@ -142,20 +145,16 @@ class BaseGraph:
             row = aircraft_grp.loc[tail] if tail in aircraft_grp.index else None
 
             avg_dep_delay = row["DEP_DELAY"] if row is not None else 0
-            # avg_arr_delay = row["ARR_DELAY"] if row is not None else 0
-
-            # cancellation_rate = row["CANCELLED"] if row is not None else 0
-
             avg_distance = row["DISTANCE"] if row is not None else 0
             crs_elapsed_time = row["CRS_ELAPSED_TIME"] if row is not None else 0
-
             num_of_flights = row["num_of_flights"] if row is not None else 0
+
+            num_of_flights = np.log1p(num_of_flights)  # log scaling to reduce skewness
+
 
             # Combine into feature vector
             features = [
                 avg_dep_delay,     
-                # avg_arr_delay,        
-                # cancellation_rate, 
                 avg_distance,      
                 crs_elapsed_time, 
                 num_of_flights        
@@ -170,14 +169,11 @@ class BaseGraph:
         ######## AIRLINE FEATURES #############
 
 
-        airline_grp = self.df.groupby("OP_CARRIER_AIRLINE_ID").agg({
+        airline_grp = train_df.groupby("OP_CARRIER_AIRLINE_ID").agg({
             "DEP_DELAY": "mean",          # Avg departure delay for this airline
-            # "ARR_DELAY": "mean",          # Avg arrival delay
-            # "CANCELLED": "mean",          # Cancellation rate
             "DIVERTED": "mean",           # Diversion rate
             "DISTANCE": "mean",           # Avg distance flown
             "TAXI_OUT": "mean",           # Avg taxi-out time (congestion proxy)
-            # "TAXI_IN": "mean",            # Avg taxi-in time
             "OP_CARRIER_AIRLINE_ID": "count"  # Number of flights for this airline
         }).rename(columns={"OP_CARRIER_AIRLINE_ID": "num_flights"})
         # Now: num_flights = total flights this airline operated
@@ -190,30 +186,21 @@ class BaseGraph:
             # Extract airline stats from precomputed groupby
             row = airline_grp.loc[carrier] if carrier in airline_grp.index else None
 
-            # If no data available (rare), fallback to 0
             avg_dep_delay = row["DEP_DELAY"] if row is not None else 0
-            # avg_arr_delay = row["ARR_DELAY"] if row is not None else 0
-
-            # cancellation_rate = row["CANCELLED"] if row is not None else 0
             diverted_rate = row["DIVERTED"] if row is not None else 0
-
             avg_distance = row["DISTANCE"] if row is not None else 0
             avg_taxi_out = row["TAXI_OUT"] if row is not None else 0
-            # avg_taxi_in = row["TAXI_IN"] if row is not None else 0
-
             num_flights = row["num_flights"] if row is not None else 0
+
+            num_flights = np.log1p(num_flights)  # log scaling to reduce skewness
 
             # Combine all features into one vector
             features = [
-                avg_dep_delay,     # 1. Avg departure delay
-                # avg_arr_delay,     # 2. Avg arrival delay
-
-                # cancellation_rate, # 5. Cancellation rate
-                diverted_rate,     # 6. Diversion rate
-                avg_distance,      # 7. Avg distance flown
-                avg_taxi_out,      # 8. Avg taxi-out
-                # avg_taxi_in,       # 9. Avg taxi-in
-                num_flights        # 10. Number of flights for this airline
+                avg_dep_delay,
+                diverted_rate,
+                avg_distance,
+                avg_taxi_out,
+                num_flights
             ]
 
             airline_features.append(features)
@@ -224,12 +211,17 @@ class BaseGraph:
 
         ###### FLIGHT FEATURES ##########
 
-
+        # Previous arrival delay for the same aircraft (temporal feature)
+        self.df["DEP_TIME_MINUTES"] = self.df["CRS_DEP_TIME"].apply(self.hhmm_to_minutes)
+        df_sorted = self.df.sort_values(["TAIL_NUM", "FL_DATE", "DEP_TIME_MINUTES"]).copy()
+        prev = df_sorted.groupby("TAIL_NUM")["ARR_DELAY"].shift(1).fillna(0)
+        self.df["PREV_ARR_DELAY"] = prev.reindex(self.df.index).fillna(0)
         
         # Since each flight is a row in the dataframe, we can directly use the columns as features
         flight_features = self.df[[
             "CRS_DEP_TIME",
             "CRS_ARR_TIME",
+            "PREV_ARR_DELAY",
             "DAY_OF_WEEK",
             "MONTH",
             "DISTANCE",
@@ -268,7 +260,6 @@ class BaseGraph:
         data["airport"].x = torch.tensor(airport_arr, dtype=torch.float)
         data["aircraft"].x = torch.tensor(aircraft_arr, dtype=torch.float)
         data["airline"].x = torch.tensor(airline_arr, dtype=torch.float)
-        data["cause"].x = torch.eye(len(causes), dtype=torch.float)  # One-hot encoding for causes
 
         num_flights = len(self.df) #Every line in data is a different flight
         data["flight"].x = torch.tensor(flight_arr, dtype=torch.float)
@@ -283,70 +274,44 @@ class BaseGraph:
 
         # Edge 1: flight originates from airport
         data["flight", "originates_from", "airport"].edge_index = torch.tensor([flight_index, origin], dtype=torch.long)
+        # Reverse edge: airport has departing flights
+        data["airport", "has_departure", "flight"].edge_index = torch.tensor([origin, flight_index], dtype=torch.long)
 
         # Edge 2: flight arrives at airport
         data["flight", "arrives_at", "airport"].edge_index = torch.tensor([flight_index, dest], dtype=torch.long)
+        # Reverse edge: airport has arriving flights
+        data["airport", "has_arrival", "flight"].edge_index = torch.tensor([dest, flight_index], dtype=torch.long)
 
         # Edge 3: flight operated by airline
         data["flight", "operated_by", "airline"].edge_index = torch.tensor([flight_index, airline], dtype=torch.long)
+        # Reverse edge: airline operates flights
+        data["airline", "operates", "flight"].edge_index = torch.tensor([airline, flight_index], dtype=torch.long)
 
         # Edge 4: flight performed by aircraft
         data["flight", "performed_by", "aircraft"].edge_index = torch.tensor([flight_index, aircraft], dtype=torch.long)
+        # Reverse edge: aircraft performs flights
+        data["aircraft", "performs", "flight"].edge_index = torch.tensor([aircraft, flight_index], dtype=torch.long)
 
         # Edge 5: flight 1 performed by aircraft that later performs flight 2 (temporal link)
-        next_src = []
-        next_dst = []
-        self.df["DEP_TIME_MINUTES"] = self.df["CRS_DEP_TIME"].apply(self.hhmm_to_minutes)
-        df_sorted = self.df.sort_values(["TAIL_NUM", "FL_DATE", "DEP_TIME_MINUTES"]).reset_index(drop=True)
-        for tail, group in df_sorted.groupby("TAIL_NUM"):
-            idx_list = group.index.tolist()
-            # link consecutive flights
-            for i in range(len(idx_list) - 1):
-                next_src.append(idx_list[i])
-                next_dst.append(idx_list[i + 1])
+        next_src, next_dst = [], []
 
-        data["flight", "next_same_aircraft", "flight"].edge_index = torch.tensor([next_src, next_dst], dtype=torch.long)
+        temp_df = self.df[["TAIL_NUM", "FL_DATE", "DEP_TIME_MINUTES"]].copy()
+        temp_df["node_idx"] = np.arange(len(temp_df), dtype=np.int64)
 
-        # Edge 6: flight delayed because of cause
-        delay_causes = {
-            "CARRIER_DELAY": "CARRIER",
-            "WEATHER_DELAY": "WEATHER",
-            "NAS_DELAY": "NAS",
-            "SECURITY_DELAY": "SECURITY",
-            "LATE_AIRCRAFT_DELAY": "LATE_AIRCRAFT"
-        }
-        src = []
-        dst = []
+        df_sorted = temp_df.sort_values(["TAIL_NUM", "FL_DATE", "DEP_TIME_MINUTES"])
 
-        df_reset = self.df.reset_index(drop=True)
+        for _, group in df_sorted.groupby("TAIL_NUM", sort=False):
+            ids = group["node_idx"].to_numpy()
+            if len(ids) >= 2:
+                next_src.extend(ids[:-1].tolist())
+                next_dst.extend(ids[1:].tolist())
 
-        for i, row in df_reset.iterrows():
-            for delay_col, cause in delay_causes.items():
-                if row[delay_col] > 0:
-                    src.append(i)
-                    dst.append(cause_map[cause])
-
-        data["flight", "delayed_because_of", "cause"].edge_index = torch.tensor([src, dst], dtype=torch.long)
-
-        # Edge 7: flight cancelled because of cause
-        # currently removed cancelled flights from dataset, might change later to
-        # support cancellation prediction as well
-
-        # cancel_causes = {
-        #     "A": "CARRIER",
-        #     "B": "WEATHER", 
-        #     "C": "NAS",
-        #     "D": "SECURITY"
-        # }
-
-        # c_src = []
-        # c_dst = []
-        # for i, row in df_reset.iterrows():
-        #     if row["CANCELLED"] == 1 and row["CANCELLATION_CODE"] in cancel_causes:
-        #         cause = cancel_causes[row["CANCELLATION_CODE"]]
-        #         c_src.append(i)
-        #         c_dst.append(cause_map[cause])
-        # data["flight", "cancelled_because_of", "cause"].edge_index = torch.tensor([c_src, c_dst], dtype=torch.long)
+        data["flight", "next_same_aircraft", "flight"].edge_index = torch.tensor(
+            [next_src, next_dst], dtype=torch.long
+        )
+        data["flight", "prev_same_aircraft", "flight"].edge_index = torch.tensor(
+            [next_dst, next_src], dtype=torch.long
+        )
 
         # dataset split masks
         train_mask = torch.zeros(num_flights, dtype=torch.bool)
@@ -361,11 +326,10 @@ class BaseGraph:
         data["flight"].val_mask = val_mask
         data["flight"].test_mask = test_mask
 
-
         #label for predicting arrival delays
-        data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)
+        data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float)
 
-        # Attach metadata so the graph object is self-contained when saved/loaded
+        # Attach norm_stats and split indexes so the graph is self-contained when saved
         try:
             data.norm_stats = self.norm_stats
         except Exception:
