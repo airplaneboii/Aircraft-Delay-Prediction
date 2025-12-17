@@ -2,14 +2,16 @@ from src.config import get_args
 from src.graph.base import BaseGraph
 from src.graph.heteroNew import HeteroNewGraph
 from src.graph.heteroNew2 import HeteroNewGraph2
+from src.graph.heteroNew3 import HeteroNewGraph3
+from src.graph.not_very_hetero import NotVeryHetero
 from src.models.dummymodel import DummyModel
 from src.models.heterosage import HeteroSAGE
 from src.models.hgtmodel import HGT
 from src.models.rgcnmodel import RGCN
-from src.models.rgcn_norelu import RGCN as RGCNNoReLU
+from src.models.rgcn_norelu import RGCNNoReLU
 from src.train import train
 from src.test import test
-from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats
+from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats, print_available_memory
 from data.data_loader import load_data
 import torch
 import os
@@ -57,6 +59,12 @@ def main():
         elif args.graph_type == "heteroNew2":
             graph = HeteroNewGraph2(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
+        elif args.graph_type == "heteroNew3":
+            graph = HeteroNewGraph3(df, args, train_index, val_index, test_index, norm_stats).build()
+            print_graph_stats(graph)
+        elif args.graph_type == "not_very_hetero":
+            graph = NotVeryHetero(df, args, train_index, val_index, test_index, norm_stats).build()
+            print_graph_stats(graph)
         else:
             print(args.graph_type)
             raise ValueError("Unsupported graph type.")
@@ -77,8 +85,21 @@ def main():
         print("Neighbor sampling enabled: keeping full graph on CPU; mini-batches will be moved per step.")
     else:
         graph = move_graph_to_device(graph, device)
-    metadata = graph.metadata() #metadata[0] are node types, metadata[1] are edge types
-    in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
+    
+    # Display available memory after graph building
+    print_available_memory()
+    
+    # Handle both homogeneous and heterogeneous graphs
+    from torch_geometric.data import HeteroData
+    is_hetero = isinstance(graph, HeteroData)
+    
+    if is_hetero:
+        metadata = graph.metadata()  # metadata[0] are node types, metadata[1] are edge types
+        in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
+    else:
+        # Homogeneous graph
+        metadata = (["flight"], [("flight", "to", "flight")])
+        in_channels_dict = {"flight": graph.x.size(1)}
 
     # Select model
     if args.model_type == "none":
@@ -123,7 +144,7 @@ def main():
             in_channels_dict=in_channels_dict,
             hidden_channels=128,
             out_channels=out_channels,
-            num_layers=4,
+            num_layers=2,
             dropout=0.2,
         ).to(device)
     elif args.model_type == "hgtmodel":

@@ -4,7 +4,7 @@ from torch_geometric.nn import RGCNConv
 import torch.nn.functional as F
 
 
-class RGCN(nn.Module):
+class RGCNNoReLU(nn.Module):
     def __init__(
         self,
         metadata,

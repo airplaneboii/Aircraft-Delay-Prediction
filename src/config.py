@@ -53,7 +53,7 @@ def get_args():
                         help="Optional: limit the number of rows to load from the CSV (for quick tests).")    
     
     # Graphs and graph parameters 
-    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew", "heteroNew2"], default=DEFAULT_GRAPH_TYPE,
+    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew", "heteroNew2", "heteroNew3", "not_very_hetero"], default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=None,
                         help="Filename to save the built graph to (e.g., 'graph.pt'; default: None, don't save)")

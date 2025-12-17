@@ -10,6 +10,12 @@ try:
 except Exception:
     get_data_size = None
 
+try:
+    import psutil
+except Exception:
+    psutil = None
+
+
 ###################### SETUP LOGGING ######################
 def setup_logging(verbosity: int = 0, logfile: Optional[str] = None) -> logging.Logger:
     """Configure root logger for the application.
@@ -51,11 +57,14 @@ def regression_metrics(
     y_pred_np = y_pred.detach().cpu().numpy()
     y_true_np = y_true.detach().cpu().numpy()
 
-    if norm_stats is not None:
-        mu = norm_stats["mu"]["ARR_DELAY"]
-        sigma = norm_stats["sigma"]["ARR_DELAY"]
-        y_pred_np = (y_pred_np * sigma) + mu
-        y_true_np = (y_true_np * sigma) + mu
+    # Only denormalize if norm_stats has the expected structure
+    if norm_stats is not None and isinstance(norm_stats, dict):
+        if "mu" in norm_stats and "sigma" in norm_stats:
+            if "ARR_DELAY" in norm_stats["mu"] and "ARR_DELAY" in norm_stats["sigma"]:
+                mu = norm_stats["mu"]["ARR_DELAY"]
+                sigma = norm_stats["sigma"]["ARR_DELAY"]
+                y_pred_np = (y_pred_np * sigma) + mu
+                y_true_np = (y_true_np * sigma) + mu
 
     mse = mean_squared_error(y_true_np, y_pred_np)
     rmse = mse ** 0.5
@@ -88,6 +97,49 @@ def classification_metrics(
 ###############################
 # To work on GPU if available #
 ###############################
+def get_available_gpu_memory():
+    """Get available GPU VRAM in MB. Returns None if CUDA not available."""
+    if torch.cuda.is_available():
+        try:
+            device = torch.device('cuda')
+            props = torch.cuda.get_device_properties(device)
+            allocated = torch.cuda.memory_allocated(device) / 1024**2
+            total = props.total_memory / 1024**2
+            available = total - allocated
+            return {"available_mb": available, "total_mb": total, "allocated_mb": allocated}
+        except Exception:
+            return None
+    return None
+
+
+def get_available_system_memory():
+    """Get available system RAM in MB. Returns None if psutil unavailable."""
+    if psutil:
+        try:
+            mem = psutil.virtual_memory()
+            return {"available_mb": mem.available / 1024**2, "total_mb": mem.total / 1024**2, "used_mb": mem.used / 1024**2}
+        except Exception:
+            return None
+    return None
+
+
+def print_available_memory():
+    """Print available GPU VRAM and system RAM."""
+    print("\nAvailable Memory:")
+    
+    gpu_info = get_available_gpu_memory()
+    if gpu_info:
+        print(f"  GPU VRAM:  {gpu_info['available_mb']:8.1f} MB / {gpu_info['total_mb']:.1f} MB")
+    else:
+        print(f"  GPU VRAM:  Not available (CPU mode)")
+    
+    ram_info = get_available_system_memory()
+    if ram_info:
+        print(f"  System RAM: {ram_info['available_mb']:8.1f} MB / {ram_info['total_mb']:.1f} MB")
+    else:
+        print(f"  System RAM: Unable to query")
+
+
 def move_graph_to_device(graph, device):
     for node_type in graph.node_types:
         graph[node_type].x = graph[node_type].x.to(device)
@@ -96,6 +148,72 @@ def move_graph_to_device(graph, device):
     for edge_type in graph.edge_types:
         graph[edge_type].edge_index = graph[edge_type].edge_index.to(device)
     return graph
+
+################ TRAINING/VALIDATION/TESTING STATS ####################
+def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start, logger):
+    """Compute metrics and log resource usage for training or testing epochs.
+
+    This function performs logging adjusted for the mode (train/val/test).
+    Extracts mode from args.mode for appropriate logging behavior.
+    """
+    import time
+    epoch_time = time.time() - epoch_start
+    mode = args.mode
+
+    # Metrics
+    if args.prediction_type == "regression":
+        norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None)
+        metrics_results = regression_metrics(labels_cat, preds_cat, norm_stats)
+        metrics_str = (
+            f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
+            f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
+        )
+    else:
+        metrics_results = classification_metrics(labels_cat, preds_cat)
+        metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
+
+    avg_loss = sum(epoch_losses) / max(len(epoch_losses), 1)
+
+    # Resource usage
+    gpu_mem_cur = None
+    gpu_mem_peak = None
+    if torch.cuda.is_available():
+        try:
+            gpu_mem_cur = torch.cuda.memory_allocated() / 1024**2
+            gpu_mem_peak = torch.cuda.max_memory_allocated() / 1024**2
+        except Exception:
+            gpu_mem_cur = gpu_mem_peak = None
+
+    cpu_info = None
+    if psutil:
+        try:
+            p = psutil.Process()
+            mem_mb = p.memory_info().rss / 1024**2
+            cpu_pct = psutil.cpu_percent(interval=None)
+            cpu_info = (mem_mb, cpu_pct)
+        except Exception:
+            cpu_info = None
+
+    # Build info parts based on mode
+    info_parts = []
+    
+    if mode == "train":
+        info_parts.append(f"Epoch {epoch+1}/{args.epochs}")
+    elif mode in ("val", "test"):
+        info_parts.append(mode.upper())
+    
+    info_parts.append(f"loss: {avg_loss:.4f}")
+    info_parts.append(metrics_str)
+    info_parts.append(f"time: {epoch_time:.2f}s")
+    
+    if gpu_mem_peak is not None:
+        info_parts.append(f"gpu_mem: {gpu_mem_peak:.1f} MB")
+    
+    if cpu_info is not None:
+        info_parts.append(f"proc_mem: {cpu_info[0]:.1f} MB")
+        info_parts.append(f"cpu%: {cpu_info[1]:.1f}")
+
+    logger.info(" - ".join(info_parts))
 
 
 ################ GRAPH STATISTICS ####################

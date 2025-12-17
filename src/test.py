@@ -3,8 +3,9 @@ from datetime import datetime
 import torch
 import pandas as pd
 import os
-from src.utils import regression_metrics, classification_metrics
+from src.utils import regression_metrics, classification_metrics, compute_epoch_stats
 from torch_geometric.loader import NeighborLoader
+from torch_geometric.data import HeteroData
 import logging
 from tqdm.auto import tqdm
 
@@ -27,11 +28,14 @@ def test(
 
     device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
+    
+    # Detect if graph is heterogeneous or homogeneous
+    is_hetero = isinstance(graph, HeteroData)
 
     if args.mode == "val":
-        eval_mask = graph["flight"].val_mask
+        eval_mask = graph["flight"].val_mask if is_hetero else graph.val_mask
     elif args.mode == "test":
-        eval_mask = graph["flight"].test_mask
+        eval_mask = graph["flight"].test_mask if is_hetero else graph.test_mask
     else:
         raise ValueError(f"Invalid mode for testing: {args.mode}")
 
@@ -61,9 +65,11 @@ def test(
 
     # Create loader if requested
     if use_neighbor_sampling:
-        # num_flights = graph["flight"].x.size(0)
-        # input_nodes = ("flight", torch.arange(num_flights))
-        input_nodes = ("flight", eval_nodes)
+        if is_hetero:
+            input_nodes = ("flight", eval_nodes)
+        else:
+            input_nodes = eval_nodes
+        
         loader = NeighborLoader(
             graph,
             num_neighbors=fanouts,
@@ -83,30 +89,51 @@ def test(
             total_batches = len(loader) if hasattr(loader, "__len__") else None
             for batch_idx, batch in enumerate(tqdm(loader, total=total_batches, desc="Testing")):
                 batch = batch.to(device)
-                out = model(batch.x_dict, batch.edge_index_dict)
-                flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
+                
+                if is_hetero:
+                    out = model(batch.x_dict, batch.edge_index_dict)
+                    flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
+                else:
+                    out = model(batch.x, batch.edge_index)
+                    flight_batch_size = batch.x.size(0)
 
                 if args.prediction_type == "regression":
-                    labels = batch["flight"].y.squeeze(-1)[:flight_batch_size]
+                    if is_hetero:
+                        labels = batch["flight"].y.squeeze(-1)[:flight_batch_size]
+                    else:
+                        labels = batch.y.squeeze(-1)[:flight_batch_size]
                     preds = out.squeeze(-1)[:flight_batch_size]
                     all_labels.append(labels.detach().cpu())
                     all_preds.append(preds.detach().cpu())
                 else:
-                    labels = batch["flight"].y.view(-1).long()[:flight_batch_size]
+                    if is_hetero:
+                        labels = batch["flight"].y.view(-1).long()[:flight_batch_size]
+                    else:
+                        labels = batch.y.view(-1).long()[:flight_batch_size]
                     logits = out[:flight_batch_size]
                     preds = torch.argmax(logits, dim=1)
                     all_labels.append(labels.detach().cpu())
                     all_preds.append(preds.detach().cpu())
 
         else:
-            out = model(graph.x_dict, graph.edge_index_dict)
+            if is_hetero:
+                out = model(graph.x_dict, graph.edge_index_dict)
+            else:
+                out = model(graph.x, graph.edge_index)
+            
             if args.prediction_type == "regression":
-                labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
+                if is_hetero:
+                    labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
+                else:
+                    labels = graph.y.float().squeeze(-1)[eval_mask]
                 preds = out.squeeze(-1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = graph["flight"].y.long()[eval_mask]
+                if is_hetero:
+                    labels = graph["flight"].y.long()[eval_mask]
+                else:
+                    labels = graph.y.long()[eval_mask]
                 preds = torch.argmax(out, dim=1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
@@ -212,34 +239,9 @@ def test(
             metrics_results = classification_metrics(labels_cat, preds_cat)
             metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
-        # Resource usage similar to train.py
-        gpu_mem = None
-        if torch.cuda.is_available():
-            try:
-                gpu_mem = torch.cuda.max_memory_allocated() / 1024**2
-            except Exception:
-                gpu_mem = None
-
-        cpu_info = None
-        if psutil:
-            p = psutil.Process()
-            mem_mb = p.memory_info().rss / 1024**2
-            cpu_pct = psutil.cpu_percent(interval=None)
-            cpu_info = (mem_mb, cpu_pct)
-
-        elapsed = time.time() - start_ts
-        info_parts = [f"Test", f"{metrics_str}", f"time: {elapsed:.2f}s"]
-        if gpu_mem is not None:
-            info_parts.append(f"gpu_mem_peak: {gpu_mem:.1f} MB")
-        if cpu_info is not None:
-            info_parts.append(f"proc_mem: {cpu_info[0]:.1f} MB")
-            info_parts.append(f"cpu%: {cpu_info[1]:.1f}")
-
-        # If using tqdm, use tqdm.write to avoid corrupting the bar
-        if use_neighbor_sampling:
-            tqdm.write(" - ".join(info_parts))
-        else:
-            logger.info(" - ".join(info_parts))
+        # Use the shared logging helper to print metrics and resource usage
+        # Pass epoch=0 and a dummy epoch_losses list for compatibility
+        compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
 
     end_ts = time.time()
     end_dt = datetime.now()

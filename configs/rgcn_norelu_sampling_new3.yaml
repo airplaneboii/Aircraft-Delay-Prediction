@@ -1,0 +1,19 @@
+# Example config file, it trains a RGCN without sampling. It loads the graph from disk.
+# This config demands ~6700MB of VRAM. Other settings match defaults.
+mode: train
+rows: null
+graph_type: heteroNew3
+save_graph: ""
+load_graph: "new3_12m.pt"
+model_file: rgcn_norelu_new3_12m
+model_type: rgcn_norelu
+data_path: data/datasets/12M_20251213_112224.csv
+graph_dir: src/graph/
+model_dir: src/models/
+epochs: 50
+lr: 0.001
+prediction_type: regression
+batch_size: 150000
+neighbor_sampling: true
+neighbor_fanouts: "15,10"
+verbosity: 1
