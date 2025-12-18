@@ -3,15 +3,16 @@
 mode: train
 model_type: hgtmodel
 data_path: ""
+graph_type: heteroNew2
 graph_dir: src/graph/
 model_dir: src/models/
 epochs: 20
-batch_size: 150000
+batch_size: 2048
 lr: 0.0005
 prediction_type: regression
 neighbor_sampling: true
-neighbor_fanouts: "20,15"
-verbosity: 2
+neighbor_fanouts: "10,10"
+verbosity: 1
 
 # Notes:
 # - This config demonstrates using HGT with mini-batch neighbor sampling.
