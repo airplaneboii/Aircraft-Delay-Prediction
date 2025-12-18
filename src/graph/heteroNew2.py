@@ -21,6 +21,7 @@ class HeteroNewGraph2:
         self.val_index = val_index
         self.test_index = test_index
         self.norm_stats = norm_stats
+        self.classification = args.prediction_type == "classification"
 
     
     def hhmm_to_minutes(self, hhmm):
@@ -315,7 +316,10 @@ class HeteroNewGraph2:
         data["flight"].test_mask = test_mask
 
         #label for predicting arrival delays
-        data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)
+        if self.classification:
+            data["flight"].y = torch.tensor(self.df["ARR_DEL15"].fillna(0).values, dtype=torch.float).unsqueeze(1)
+        else:
+            data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)
 
         # Attach norm_stats and split indexes so the graph is self-contained when saved
         try:

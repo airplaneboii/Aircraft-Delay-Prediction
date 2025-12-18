@@ -135,7 +135,7 @@ def test(
 
                 # convert logits to 0/1 predictions
                 probs = torch.sigmoid(logits)
-                preds = (probs >= 0.5).long()
+                preds = (probs >= args.border).long()
 
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
