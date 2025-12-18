@@ -80,26 +80,18 @@ def main():
     print("checking for GPUs...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    # Display available memory before graph building
+    print_available_memory()
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
     if use_neighbor_sampling and args.mode == "train":
         print("Neighbor sampling enabled: keeping full graph on CPU; mini-batches will be moved per step.")
     else:
         graph = move_graph_to_device(graph, device)
-    
-    # Display available memory after graph building
-    print_available_memory()
-    
-    # Handle both homogeneous and heterogeneous graphs
-    from torch_geometric.data import HeteroData
-    is_hetero = isinstance(graph, HeteroData)
-    
-    if is_hetero:
-        metadata = graph.metadata()  # metadata[0] are node types, metadata[1] are edge types
-        in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
-    else:
-        # Homogeneous graph
-        metadata = (["flight"], [("flight", "to", "flight")])
-        in_channels_dict = {"flight": graph.x.size(1)}
+        print("Graph moved to device.")
+        
+    metadata = graph.metadata() #metadata[0] are node types, metadata[1] are edge types
+    in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
+    print(f"Node feature sizes: {in_channels_dict}")
 
     # Select model
     if args.model_type == "none":
@@ -107,7 +99,7 @@ def main():
         return
     elif args.model_type == "dummymodel":
         print("Using model: dummy")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = DummyModel(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -116,7 +108,7 @@ def main():
         ).to(device)
     elif args.model_type == "heterosage":
         print("Using model: heterosage")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = HeteroSAGE(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -127,7 +119,8 @@ def main():
         ).to(device)
     elif args.model_type == "rgcnmodel":
         print("Using model: rgcn")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
+        print("out_channels:", out_channels)
         model = RGCN(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -138,7 +131,7 @@ def main():
         ).to(device)
     elif args.model_type == "rgcn_norelu":
         print("Using model: rgcn_norelu")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = RGCNNoReLU(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -149,7 +142,7 @@ def main():
         ).to(device)
     elif args.model_type == "hgtmodel":
         print("Using model: hgt")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = HGT(
             metadata=metadata,
             in_channels_dict = in_channels_dict,

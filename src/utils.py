@@ -1,9 +1,10 @@
 import os
 import torch
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, f1_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, f1_score, recall_score, precision_score
 from torch_geometric.data import HeteroData
 import logging
 from typing import Optional
+import numpy as np
 
 try:
     from torch_geometric.profile.utils import get_data_size  # available in recent PyG
@@ -81,17 +82,27 @@ def regression_metrics(
 def classification_metrics(
         y_true: torch.Tensor,
         y_pred: torch.Tensor
-        ) -> dict:
+    ) -> dict:
 
     y_true_np = y_true.cpu().numpy()
     y_pred_np = y_pred.cpu().numpy()
 
+    # If logits, apply sigmoid and threshold
+    if np.any((y_pred_np > 1) | (y_pred_np < 0)):
+        y_pred_np = 1 / (1 + np.exp(-y_pred_np))  # sigmoid
+    y_pred_np = (y_pred_np >= 0.5).astype(int)
+
     accuracy = accuracy_score(y_true_np, y_pred_np)
+
     f1 = f1_score(y_true_np, y_pred_np, average='weighted')
+    precision = precision_score(y_true_np, y_pred_np, average='binary')  # positive class precision
+    recall = recall_score(y_true_np, y_pred_np, average='binary')  # positive class recall
 
     return {
         "Accuracy": accuracy,
-        "F1_Score": f1
+        "F1_Score": f1,
+        "Recall": recall,
+        "Precision": precision
     }
 
 ###############################

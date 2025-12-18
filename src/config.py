@@ -12,9 +12,9 @@ DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
 DEFAULT_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 131072
-DEFAULT_LR = 1e-2
+DEFAULT_LR = 1e-5
 DEFAULT_WEIGHT_DECAY = 1e-4
-DEFAULT_PREDICTION_TYPE = "regression"
+DEFAULT_PREDICTION_TYPE = "regression"#"classification"
 DEFAULT_TIME_WINDOW = 6
 DEFAULT_NEIGHBOR_SAMPLING = False
 DEFAULT_NEIGHBOR_FANOUTS = "15,10"
@@ -53,7 +53,7 @@ def get_args():
                         help="Optional: limit the number of rows to load from the CSV (for quick tests).")    
     
     # Graphs and graph parameters 
-    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew", "heteroNew2", "heteroNew3", "not_very_hetero"], default=DEFAULT_GRAPH_TYPE,
+    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew", "heteroNew2", "heteroNew3", "not_very_hetero", "homogeneousGraph"], default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=None,
                         help="Filename to save the built graph to (e.g., 'graph.pt'; default: None, don't save)")

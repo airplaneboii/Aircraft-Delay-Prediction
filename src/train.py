@@ -25,6 +25,7 @@ def train(
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     # Optional learning-rate scheduler (not configured by default)
     scheduler = None
+    device = next(model.parameters()).device
 
     # y = graph["flight"].y.squeeze(-1).cpu()
     # print("y mean/std:", y.mean().item(), y.std().item(), "min/max:", y.min().item(), y.max().item())
@@ -40,9 +41,13 @@ def train(
         else:
             raise ValueError(f"Unknown regression criterion: {args.criterion}")
     else:
-        criterion = nn.CrossEntropyLoss()
+        
+        y = graph["flight"].y[graph["flight"].train_mask].view(-1)
+        num_pos = (y == 1).sum().item()
+        num_neg = (y == 0).sum().item()
+        pos_weight = torch.tensor([num_neg / num_pos], device=device)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-    device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
 
     # Resolve neighbor fanouts (None => full neighbors)
@@ -59,16 +64,9 @@ def train(
         else:
             fanouts = fanouts[:depth]
 
-    # Detect if graph is heterogeneous or homogeneous
-    is_hetero = isinstance(graph, HeteroData)
-    
     if use_neighbor_sampling:
-        if is_hetero:
-            train_nodes = graph["flight"].train_mask.nonzero(as_tuple=False).view(-1)
-            input_nodes = ("flight", train_nodes)
-        else:
-            train_nodes = graph.train_mask.nonzero(as_tuple=False).view(-1)
-            input_nodes = train_nodes
+        train_nodes = graph["flight"].train_mask.nonzero(as_tuple=False).view(-1)
+        input_nodes = ("flight", train_nodes)
         
         loader = NeighborLoader(
             graph,
@@ -128,31 +126,26 @@ def train(
 
                     logger.debug("epoch %d batch %d: forward start", epoch+1, batch_idx)
                     
-                    if is_hetero:
-                        out = model(batch.x_dict, batch.edge_index_dict)
-                        flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
-                    else:
-                        out = model(batch.x, batch.edge_index)
-                        flight_batch_size = batch.x.size(0)
+                    out = model(batch.x_dict, batch.edge_index_dict)
+                    flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
                     
                     logger.debug("epoch %d batch %d: forward done, out shape=%s", epoch+1, batch_idx, tuple(out.shape))
 
-                    if args.prediction_type == "regression":
-                        if is_hetero:
-                            labels = batch["flight"].y.squeeze(-1)[:flight_batch_size].to(device)
-                        else:
-                            labels = batch.y.squeeze(-1)[:flight_batch_size].to(device)
-                        preds = out.squeeze(-1)[:flight_batch_size]
-                        loss = criterion(preds, labels)
-                        preds_for_metrics = preds.detach().cpu()
-                    else:
-                        if is_hetero:
-                            labels = batch["flight"].y.view(-1).long()[:flight_batch_size].to(device)
-                        else:
-                            labels = batch.y.view(-1).long()[:flight_batch_size].to(device)
-                        logits = out[:flight_batch_size]
-                        loss = criterion(logits, labels)
-                        preds_for_metrics = torch.argmax(logits.detach().cpu(), dim=1)
+                if args.prediction_type == "regression":
+                    labels = batch["flight"].y.squeeze(-1)[:flight_batch_size].to(device)
+                    preds = out.squeeze(-1)[:flight_batch_size]
+                    loss = criterion(preds, labels)
+                    preds_for_metrics = preds.detach().cpu()
+                else:
+                    mask = graph["flight"].train_mask
+                    labels = graph["flight"].y.view(-1).float()[mask].to(device)
+                    logits = out[mask].squeeze(-1)
+
+                    loss = criterion(logits, labels)
+
+                    probs = torch.sigmoid(logits)
+                    preds_for_metrics = (probs > 0.5).long().cpu()
+
 
                     logger.debug("epoch %d batch %d: loss computed %.6f", epoch+1, batch_idx, loss.item())
                     loss.backward()
@@ -168,33 +161,31 @@ def train(
                 optimizer.zero_grad()
                 logger.debug("epoch %d: full-batch forward start", epoch+1)
                 
-                if is_hetero:
-                    out = model(graph.x_dict, graph.edge_index_dict)
-                else:
-                    out = model(graph.x, graph.edge_index)
+                out = model(graph.x_dict, graph.edge_index_dict)
                 
                 logger.debug("epoch %d: full-batch forward done, out shape=%s", epoch+1, tuple(out.shape))
 
-                if args.prediction_type == "regression":
-                    if is_hetero:
-                        mask = graph["flight"].train_mask
-                        labels = graph["flight"].y.squeeze(-1)[mask].to(device)
-                    else:
-                        mask = graph.train_mask
-                        labels = graph.y.squeeze(-1)[mask].to(device)
-                    preds = out.squeeze(-1)[mask]
-                    loss = criterion(preds, labels)
-                    preds_for_metrics = preds.detach().cpu()
-                else:
-                    if is_hetero:
-                        mask = graph["flight"].train_mask
-                        labels = graph["flight"].y.view(-1).long()[mask].to(device)
-                    else:
-                        mask = graph.train_mask
-                        labels = graph.y.view(-1).long()[mask].to(device)
-                    logits = out[mask]
-                    loss = criterion(logits, labels)
-                    preds_for_metrics = torch.argmax(logits.detach().cpu(), dim=1)
+            if args.prediction_type == "regression":
+                # do prediction only on training nodes
+                mask = graph["flight"].train_mask
+                labels = graph["flight"].y.squeeze(-1)[mask].to(device)
+                preds = out.squeeze(-1)[mask]
+                loss = criterion(preds, labels)
+                preds_for_metrics = preds.detach().cpu()
+            else:
+                mask = graph["flight"].train_mask
+                labels = graph["flight"].y.view(-1).float()[mask].to(device)
+                logits = out[mask].squeeze(-1)
+
+                #print("logits:", logits[0:10].detach().cpu().numpy())
+                #print("labels:", labels[0:10].detach().cpu().numpy())
+
+                loss = criterion(logits, labels)
+
+                probs = torch.sigmoid(logits)
+                preds_for_metrics = (probs > 0.5).long().cpu()
+
+
 
                 logger.debug("epoch %d: loss computed %.6f", epoch+1, loss.item())
                 loss.backward()
