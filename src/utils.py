@@ -72,7 +72,8 @@ def regression_metrics(
 
 def classification_metrics(
         y_true: torch.Tensor,
-        y_pred: torch.Tensor
+        y_pred: torch.Tensor,
+        args
     ) -> dict:
 
     y_true_np = y_true.cpu().numpy()
@@ -81,7 +82,7 @@ def classification_metrics(
     # If logits, apply sigmoid and threshold
     if np.any((y_pred_np > 1) | (y_pred_np < 0)):
         y_pred_np = 1 / (1 + np.exp(-y_pred_np))  # sigmoid
-    y_pred_np = (y_pred_np >= 0.5).astype(int)
+    y_pred_np = (y_pred_np >= args.border).astype(int)
 
     accuracy = accuracy_score(y_true_np, y_pred_np)
 

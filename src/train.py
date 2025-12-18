@@ -1,3 +1,4 @@
+#from asyncio import graph
 import torch
 import time
 from datetime import datetime
@@ -11,6 +12,8 @@ try:
     import psutil
 except Exception:
     psutil = None
+
+OVERSAMPLE_FACTOR = 1.0
 
 def train(
         model: nn.Module,
@@ -41,7 +44,9 @@ def train(
         y = graph["flight"].y[graph["flight"].train_mask].view(-1)
         num_pos = (y == 1).sum().item()
         num_neg = (y == 0).sum().item()
+        print(num_pos, num_neg)
         pos_weight = torch.tensor([num_neg / num_pos], device=device)
+        #pos_weight = torch.tensor([num_neg / num_neg], device=device) # 1.0 no weighting
         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
@@ -113,13 +118,34 @@ def train(
                     preds_for_metrics = preds.detach().cpu()
                 else:
                     mask = graph["flight"].train_mask
-                    labels = graph["flight"].y.view(-1).float()[mask].to(device)
-                    logits = out[mask].squeeze(-1)
+                    labels_full = graph["flight"].y.view(-1)[mask]       # original labels
+                    logits_full = out[mask].squeeze(-1)                 # logits for all training nodes
+                    
+                    # separate positive and negative indices
+                    pos_mask = labels_full == 1
+                    neg_mask = labels_full == 0
+                    
+                    pos_indices = pos_mask.nonzero(as_tuple=False).view(-1)
+                    neg_indices = neg_mask.nonzero(as_tuple=False).view(-1)
+                    
+                    # oversample positives
+                    oversample_factor = int(OVERSAMPLE_FACTOR)
+                    pos_indices_os = pos_indices.repeat(oversample_factor)
+                    
+                    # combined indices for loss computation
+                    train_indices_os = torch.cat([neg_indices, pos_indices_os])
+                    
+                    # final labels & logits for loss
+                    labels_os = labels_full[train_indices_os].float().to(device)
+                    logits_os = logits_full[train_indices_os]
+                    
+                    # compute loss
+                    loss = criterion(logits_os, labels_os)
+                    
+                    # metrics stay on original labels
+                    probs = torch.sigmoid(logits_full)
+                    preds_for_metrics = (probs > args.border).long().cpu()
 
-                    loss = criterion(logits, labels)
-
-                    probs = torch.sigmoid(logits)
-                    preds_for_metrics = (probs > 0.5).long().cpu()
 
 
                 logger.debug("epoch %d batch %d: loss computed %.6f", epoch+1, batch_idx, loss.item())
@@ -156,7 +182,7 @@ def train(
                 loss = criterion(logits, labels)
 
                 probs = torch.sigmoid(logits)
-                preds_for_metrics = (probs > 0.5).long().cpu()
+                preds_for_metrics = (probs > args.border).long().cpu()
 
 
 
@@ -184,7 +210,7 @@ def train(
                 f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
             )
         else:
-            metrics_results = classification_metrics(labels_cat, preds_cat)
+            metrics_results = classification_metrics(labels_cat, preds_cat, args)
             metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
         avg_loss = sum(epoch_losses) / max(len(epoch_losses), 1)

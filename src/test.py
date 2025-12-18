@@ -111,7 +111,7 @@ def test(
 
                 # convert logits to 0/1 predictions
                 probs = torch.sigmoid(logits)
-                preds = (probs >= 0.5).long()
+                preds = (probs >= args.border).long()
 
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
@@ -248,7 +248,7 @@ def test(
                 f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
             )
         else:
-            metrics_results = classification_metrics(labels_cat, preds_cat)
+            metrics_results = classification_metrics(labels_cat, preds_cat, args)
             metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
         # Resource usage similar to train.py

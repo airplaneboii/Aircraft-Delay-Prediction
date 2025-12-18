@@ -4,22 +4,24 @@ import glob
 
 # Default values for CLI
 DEFAULT_MODE = "train"
-DEFAULT_GRAPH_TYPE = "heteroNew"#"base"
+DEFAULT_GRAPH_TYPE = "heteroNew2"#"base"
 DEFAULT_MODEL_TYPE = "rgcnmodel"#"none"
 DEFAULT_MODEL_FILENAME = None
 DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
-DEFAULT_EPOCHS = 50
+DEFAULT_EPOCHS = 500
 DEFAULT_BATCH_SIZE = 131072
-DEFAULT_LR = 1e-5
-DEFAULT_WEIGHT_DECAY = 1e-4
-DEFAULT_PREDICTION_TYPE = "regression"#"classification"
+DEFAULT_LR = 1e-3
+DEFAULT_WEIGHT_DECAY = 1e-6
+DEFAULT_PREDICTION_TYPE = "classification"#"regression"#"classification"
+DEFAULT_CLASS_BORDER = 0.45
 DEFAULT_TIME_WINDOW = 6
 DEFAULT_NEIGHBOR_SAMPLING = False
 DEFAULT_NEIGHBOR_FANOUTS = "15,10"
 DEFAULT_VERBOSITY_LEVEL = 1
 DEFAULT_CRITERION = "huber"
+
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -91,6 +93,8 @@ def get_args():
                         help="Enable mini-batch neighbor sampling instead of full-batch training (default: disabled)")
     parser.add_argument("-f", "--neighbor_fanouts", type=parse_fanouts, default=DEFAULT_NEIGHBOR_FANOUTS,
                         help=f"Comma-separated neighbors to sample per layer, e.g. '15,10' (default: {DEFAULT_NEIGHBOR_FANOUTS})")
+    parser.add_argument("--border", type=float, default=DEFAULT_CLASS_BORDER,
+                        help="Border value for classification tasks")
     # Logging / verbosity
     parser.add_argument("-v", "--verbosity", type=int, choices=[0,1,2], default=DEFAULT_VERBOSITY_LEVEL,
                         help="Verbosity level: 0=warning, 1=info, 2=debug")
