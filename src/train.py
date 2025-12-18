@@ -185,8 +185,6 @@ def train(
                 probs = torch.sigmoid(logits)
                 preds_for_metrics = (probs > 0.5).long().cpu()
 
-
-
                 logger.debug("epoch %d: loss computed %.6f", epoch+1, loss.item())
                 loss.backward()
                 logger.debug("epoch %d: backward done", epoch+1)

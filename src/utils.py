@@ -181,7 +181,7 @@ def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses,
         )
     else:
         metrics_results = classification_metrics(labels_cat, preds_cat)
-        metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
+        metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
     avg_loss = sum(epoch_losses) / max(len(epoch_losses), 1)
 

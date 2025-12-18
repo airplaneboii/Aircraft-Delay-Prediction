@@ -265,16 +265,6 @@ def test(
                 #preds_unnorm = torch.from_numpy((preds_cat.cpu().numpy() * sigma + mu)).to(preds_cat.device)
             #    metrics_results = regression_metrics(labels_unnorm, preds_unnorm, args.norm_stats)
             #else:
-            metrics_results = regression_metrics(labels_cat, preds_cat, norm_stats)
-
-            metrics_str = (
-                f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
-                f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
-            )
-        else:
-            metrics_results = classification_metrics(labels_cat, preds_cat)
-            metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
-
         # Use the shared logging helper to print metrics and resource usage
         # Pass epoch=0 and a dummy epoch_losses list for compatibility
         compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
