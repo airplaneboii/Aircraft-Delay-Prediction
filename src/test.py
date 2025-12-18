@@ -106,10 +106,16 @@ def test(
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = graph["flight"].y.long()[eval_mask]
-                preds = torch.argmax(out, dim=1)[eval_mask]
+                labels = graph["flight"].y.float()[eval_mask]  # float for BCE
+                logits = out[eval_mask]  # shape [num_nodes]
+
+                # convert logits to 0/1 predictions
+                probs = torch.sigmoid(logits)
+                preds = (probs >= 0.5).long()
+
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
+
 
         # Concatenate and compute metrics
         if all_labels:
@@ -120,62 +126,95 @@ def test(
             preds_cat = torch.tensor([])
 
         # Prepare (and save) predictions and true values to CSV; un-normalize if stats available
-        try:
-            # attempt to recover node ids if available (from neighbor sampling batches)
-            node_ids = None
-            if use_neighbor_sampling and loader is not None:
-                # rebuild node_ids from collected batches if they exposed 'n_id'
-                # all_batches_node_ids was not stored; try to get from last batch variable if present
-                # Fallback: use sequential ids
-                node_ids = torch.arange(labels_cat.size(0)).cpu()
-            else:
-                # full-batch: use natural order of graph flight nodes
-                node_ids = torch.arange(labels_cat.size(0)).cpu()
-
-            true_vals = labels_cat.cpu().numpy()
-            pred_vals = preds_cat.cpu().numpy()
-
-            # Try to un-normalize using args.norm_stats (prefer 'y' key then 'ARR_DELAY')
-            unnorm_true = None
-            unnorm_pred = None
+        if args.prediction_type == "regression":
             try:
-                norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None) or {}
-                mu_map = norm_stats.get("mu", {})
-                sigma_map = norm_stats.get("sigma", {})
-                if "y" in mu_map and "y" in sigma_map:
-                    mu = float(mu_map["y"])
-                    sigma = float(sigma_map["y"])
-                elif "ARR_DELAY" in mu_map and "ARR_DELAY" in sigma_map:
-                    mu = float(mu_map["ARR_DELAY"])
-                    sigma = float(sigma_map["ARR_DELAY"])
+                # attempt to recover node ids if available (from neighbor sampling batches)
+                node_ids = None
+                if use_neighbor_sampling and loader is not None:
+                    # rebuild node_ids from collected batches if they exposed 'n_id'
+                    # all_batches_node_ids was not stored; try to get from last batch variable if present
+                    # Fallback: use sequential ids
+                    node_ids = torch.arange(labels_cat.size(0)).cpu()
                 else:
-                    mu = None
-                    sigma = None
+                    # full-batch: use natural order of graph flight nodes
+                    node_ids = torch.arange(labels_cat.size(0)).cpu()
 
-                if mu is not None and sigma is not None:
-                    unnorm_true = (true_vals * sigma) + mu
-                    unnorm_pred = (pred_vals * sigma) + mu
-            except Exception:
+                true_vals = labels_cat.cpu().numpy()
+                pred_vals = preds_cat.cpu().numpy()
+
+                # Try to un-normalize using args.norm_stats (prefer 'y' key then 'ARR_DELAY')
                 unnorm_true = None
                 unnorm_pred = None
+                try:
+                    norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None) or {}
+                    mu_map = norm_stats.get("mu", {})
+                    sigma_map = norm_stats.get("sigma", {})
+                    if "y" in mu_map and "y" in sigma_map:
+                        mu = float(mu_map["y"])
+                        sigma = float(sigma_map["y"])
+                    elif "ARR_DELAY" in mu_map and "ARR_DELAY" in sigma_map:
+                        mu = float(mu_map["ARR_DELAY"])
+                        sigma = float(sigma_map["ARR_DELAY"])
+                    else:
+                        mu = None
+                        sigma = None
 
-            df = pd.DataFrame({
-                "node_id": node_ids.numpy(),
-                "true": true_vals,
-                "pred": pred_vals,
-            })
-            if unnorm_true is not None:
-                df["true_raw"] = unnorm_true
-                df["pred_raw"] = unnorm_pred
+                    if mu is not None and sigma is not None:
+                        unnorm_true = (true_vals * sigma) + mu
+                        unnorm_pred = (pred_vals * sigma) + mu
+                except Exception:
+                    unnorm_true = None
+                    unnorm_pred = None
 
-            model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
-            out_dir = getattr(args, "model_dir", ".")
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
-            df.to_csv(out_path, index=False)
-            logger.info("Saved predictions to %s", out_path)
-        except Exception:
-            logger.exception("Failed to save predictions CSV")
+                df = pd.DataFrame({
+                    "node_id": node_ids.numpy(),
+                    "true": true_vals,
+                    "pred": pred_vals,
+                })
+                if unnorm_true is not None:
+                    df["true_raw"] = unnorm_true
+                    df["pred_raw"] = unnorm_pred
+
+                model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
+                out_dir = getattr(args, "model_dir", ".")
+                os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
+                df.to_csv(out_path, index=False)
+                logger.info("Saved predictions to %s", out_path)
+            except Exception:
+                logger.exception("Failed to save predictions CSV")
+        elif args.prediction_type == "classification":
+            try:
+                # attempt to recover node ids if available (from neighbor sampling batches)
+                node_ids = None
+                if use_neighbor_sampling and loader is not None:
+                    # rebuild node_ids from collected batches if they exposed 'n_id'
+                    # all_batches_node_ids was not stored; try to get from last batch variable if present
+                    # Fallback: use sequential ids
+                    node_ids = torch.arange(labels_cat.size(0)).cpu()
+                else:
+                    # full-batch: use natural order of graph flight nodes
+                    node_ids = torch.arange(labels_cat.size(0)).cpu()
+
+                true_vals = labels_cat.view(-1).cpu().numpy()
+                pred_vals = preds_cat.view(-1).cpu().numpy()
+
+                df = pd.DataFrame({
+                    "node_id": node_ids.numpy(),
+                    "true": true_vals,
+                    "pred": pred_vals,
+                })
+
+                model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
+                out_dir = getattr(args, "model_dir", ".")
+                os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
+                df.to_csv(out_path, index=False)
+                logger.info("Saved predictions to %s", out_path)
+            except Exception:
+                logger.exception("Failed to save predictions CSV")
+        else:
+            raise ValueError(f"Unknown prediction type: {args.prediction_type}")
 
         if args.prediction_type == "regression":
             # If normalization stats exist for the target, unnormalize before computing metrics for interpretability
@@ -210,7 +249,7 @@ def test(
             )
         else:
             metrics_results = classification_metrics(labels_cat, preds_cat)
-            metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
+            metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
         # Resource usage similar to train.py
         gpu_mem = None

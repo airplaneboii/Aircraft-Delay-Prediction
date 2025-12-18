@@ -77,8 +77,10 @@ def main():
         print("Neighbor sampling enabled: keeping full graph on CPU; mini-batches will be moved per step.")
     else:
         graph = move_graph_to_device(graph, device)
+        print("Graph moved to device.")
     metadata = graph.metadata() #metadata[0] are node types, metadata[1] are edge types
     in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
+    print(f"Node feature sizes: {in_channels_dict}")
 
     # Select model
     if args.model_type == "none":
@@ -86,7 +88,7 @@ def main():
         return
     elif args.model_type == "dummymodel":
         print("Using model: dummy")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = DummyModel(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -95,7 +97,7 @@ def main():
         ).to(device)
     elif args.model_type == "heterosage":
         print("Using model: heterosage")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = HeteroSAGE(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -106,7 +108,8 @@ def main():
         ).to(device)
     elif args.model_type == "rgcnmodel":
         print("Using model: rgcn")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
+        print("out_channels:", out_channels)
         model = RGCN(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -117,7 +120,7 @@ def main():
         ).to(device)
     elif args.model_type == "rgcn_norelu":
         print("Using model: rgcn_norelu")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = RGCNNoReLU(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
@@ -128,7 +131,7 @@ def main():
         ).to(device)
     elif args.model_type == "hgtmodel":
         print("Using model: hgt")
-        out_channels = 2 if args.prediction_type == "classification" else 1
+        out_channels = 1
         model = HGT(
             metadata=metadata,
             in_channels_dict = in_channels_dict,
