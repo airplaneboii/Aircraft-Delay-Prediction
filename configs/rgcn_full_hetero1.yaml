@@ -2,10 +2,10 @@
 # This config demands ~6700MB of VRAM. Other settings match defaults.
 mode: train
 rows: null
-graph_type: heteroNew
+graph_type: hetero1
 save_graph: ""
-load_graph: "new4m.pt"
-model_type: rgcnmodel
+load_graph: "hetero1_4m.pt"
+model_type: rgcn
 data_path: data/datasets/
 graph_dir: src/graph/
 model_dir: src/models/

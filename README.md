@@ -125,7 +125,7 @@ python main.py -h
 ```
 Example:
 ```bash
-python main.py --mode train --model_type rgcnmodel --epochs 100 --lr 0.0005
+python main.py --mode train --model_type rgcn --epochs 100 --lr 0.0005
 ```
 However it is recommended to use config files instead, as there are a lot of arguments and it becomes difficult to manage. There are examples in the `configs` folder. To use a config file, run:
 ```bash

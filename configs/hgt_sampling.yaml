@@ -1,9 +1,9 @@
 ## Example HGT configuration (train with neighbor sampling)
 # Leave `data_path` blank to rely on auto-selection or pass `--data_path` on CLI
 mode: train
-model_type: hgtmodel
+model_type: hgt
 data_path: ""
-graph_type: heteroNew2
+graph_type: hetero2
 graph_dir: src/graph/
 model_dir: src/models/
 epochs: 20

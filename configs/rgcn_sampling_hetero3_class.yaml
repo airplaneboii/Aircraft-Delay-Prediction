@@ -2,17 +2,18 @@
 # This config demands ~6850MB of VRAM. Other settings match defaults.
 mode: train
 rows: null
-graph_type: heteroNew3
+graph_type: hetero3
 save_graph: ""
-load_graph: "new3_12m.pt"
-model_file: rgcnmodel_new3_12m
-model_type: rgcnmodel
-data_path: data/datasets/12M_20251213_112224.csv
+load_graph: "hetero3_24m_class.pt"
+model_file: rgcn_hetero3_24m_class
+model_type: rgcn
+data_path: data/datasets/24M_20251219_003122.csv
 graph_dir: src/graph/
 model_dir: src/models/
-epochs: 100
-lr: 0.001
-prediction_type: regression
+epochs: 1500
+lr: 0.00001
+border: 0.6
+prediction_type: classification
 batch_size: 300000
 neighbor_sampling: true
 neighbor_fanouts: "15,10"

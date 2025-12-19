@@ -1,0 +1,28 @@
+# Homogeneous Graph configuration
+# Uses homo with airport nodes and flight edges
+# Edge-level prediction for arrival delays
+mode: train
+graph_type: homo
+save_graph: ""
+load_graph: ""
+model_type: rgcn
+data_path: data/datasets/
+graph_dir: src/graph/
+model_dir: src/models/
+model_file: ""
+criterion: huber
+epochs: 100
+lr: 0.001
+weight_decay: 0.000001
+prediction_type: regression
+batch_size: 131072
+neighbor_sampling: false
+neighbor_fanouts: "15,10"
+border: 0.6
+time_window: 6
+verbosity: 1
+amp: false
+compile: false
+compile_backend: inductor
+compile_mode: default
+resume: false

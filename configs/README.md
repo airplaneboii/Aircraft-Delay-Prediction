@@ -32,7 +32,7 @@ Examples:
   - Dummy full-batch example (no sampling):
     `python main.py -c configs/dummy_nosample.yaml --data_path data/datasets/your.csv`
     
-    Runs the lightweight `dummymodel` on the full graph (no NeighborLoader sampling).
+    Runs the lightweight `dummy` on the full graph (no NeighborLoader sampling).
 
 Notes:
 

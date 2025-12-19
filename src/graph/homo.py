@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from torch_geometric.data import HeteroData
 from sklearn.preprocessing import OneHotEncoder
+from src.utils import normalize_with_idx, hhmm_to_minutes
 
 class HomoGraph:
     def __init__(self, df, args, train_index, val_index, test_index, norm_stats=None):
@@ -13,26 +14,6 @@ class HomoGraph:
         self.test_index  = np.asarray(test_index, dtype=int)
         self.norm_stats = norm_stats  # optional externally-provided stats
         self.classification = args.prediction_type == "classification"
-
-    def hhmm_to_minutes(self, hhmm):
-        if pd.isna(hhmm):
-            return 0
-        hhmm = int(hhmm)
-        hours = hhmm // 100
-        minutes = hhmm % 100
-        return hours * 60 + minutes
-
-    def _fit_norm(self, X_train: np.ndarray):
-        X_train = np.asarray(X_train, dtype=np.float32)
-        X_train = np.nan_to_num(X_train, nan=0.0, posinf=0.0, neginf=0.0)
-        mean = X_train.mean(axis=0, keepdims=True)
-        std = X_train.std(axis=0, keepdims=True) + 1e-6
-        return {"mean": mean, "std": std}
-
-    def _apply_norm(self, X: np.ndarray, stats):
-        X = np.asarray(X, dtype=np.float32)
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-        return (X - stats["mean"]) / stats["std"]
 
     def _time_to_cyclic(self, minutes_arr: np.ndarray):
         # minutes in [0, 1439], represent time-of-day cyclically
@@ -122,12 +103,12 @@ class HomoGraph:
         train_airports = sorted(set(train_df["ORIGIN_AIRPORT_ID"]).union(set(train_df["DEST_AIRPORT_ID"])))
         train_airport_idx = np.array([airport_map[a] for a in train_airports if a in airport_map], dtype=int)
 
+        fit_idx = train_airport_idx if len(train_airport_idx) > 0 else np.arange(len(airports))
         if self.norm_stats is None:
-            # If no training airports (edge case), fall back to using all rows
-            fit_idx = train_airport_idx if len(train_airport_idx) > 0 else np.arange(len(airports))
-            self.norm_stats = self._fit_norm(raw_feats[fit_idx])
-
-        norm_feats = self._apply_norm(raw_feats, self.norm_stats)
+            norm_feats, mu_airport, std_airport = normalize_with_idx(raw_feats, fit_idx)
+            self.norm_stats = {"mean": mu_airport, "std": std_airport}
+        else:
+            norm_feats = (raw_feats - self.norm_stats["mean"]) / self.norm_stats["std"]
 
         # Final airport node features = normalized numeric + one-hot WAC
         airport_x = np.concatenate([norm_feats, raw_wac], axis=1).astype(np.float32)
@@ -145,8 +126,8 @@ class HomoGraph:
 
         # Edge attributes
         ef = self.df[["CRS_DEP_TIME", "CRS_ARR_TIME", "DAY_OF_WEEK"]].copy()
-        dep_min = ef["CRS_DEP_TIME"].apply(self.hhmm_to_minutes).to_numpy(dtype=np.float32)
-        arr_min = ef["CRS_ARR_TIME"].apply(self.hhmm_to_minutes).to_numpy(dtype=np.float32)
+        dep_min = ef["CRS_DEP_TIME"].apply(hhmm_to_minutes).to_numpy(dtype=np.float32)
+        arr_min = ef["CRS_ARR_TIME"].apply(hhmm_to_minutes).to_numpy(dtype=np.float32)
         dow     = ef["DAY_OF_WEEK"].fillna(0).to_numpy(dtype=np.float32).reshape(-1, 1)
 
         dep_cyc = self._time_to_cyclic(dep_min)  # (N,2)

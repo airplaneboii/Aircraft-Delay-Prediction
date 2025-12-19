@@ -55,8 +55,8 @@ def load_data(
     val_index = np.arange(i_train, i_val)
     test_index = np.arange(i_val, num_data)
 
-    # --- Normalization: compute mu/sigma on selected columns and normalize dataset ---
-    # Determine which columns to normalize:
+    # --- Normalization: compute mu/sigma on TRAIN split only, then apply to all splits ---
+    # Avoids data leakage by fitting statistics on train and reusing for val/test.
     # - If a normalize_cols_file is provided and exists, use the listed columns (one per line).
     # - If the file is missing or empty, do NOT normalize anything (user opted out).
     num_cols = []
@@ -67,19 +67,23 @@ def load_data(
             num_cols = [c for c in requested if c in df.columns]
         except Exception:
             num_cols = []
+
     norm_stats = {"mu": {}, "sigma": {}}
     if num_cols:
-        mu = df[num_cols].mean()
-        sigma = df[num_cols].std(ddof=0)
-        # avoid zero std
-        sigma_safe = sigma.replace({0: 1.0})
-        # apply normalization in-place
+        # Fit statistics on training subset only
+        train_slice = df.loc[train_index, num_cols]
+        mu = train_slice.mean()
+        sigma = train_slice.std(ddof=0)
+        sigma_safe = sigma.replace({0: 1.0})  # guard against zero variance
+
+        # Apply train-derived stats to all rows (train/val/test)
         df[num_cols] = (df[num_cols] - mu) / sigma_safe
-        # store stats as plain floats for JSON-compatibility
+
+        # Store stats as plain floats for JSON-compatibility
         norm_stats["mu"] = {c: float(mu[c]) for c in num_cols}
         norm_stats["sigma"] = {c: float(sigma_safe[c]) for c in num_cols}
-        # Inform which columns were normalized
-        print(f"Normalized columns: {', '.join(num_cols)}")
+
+        print(f"Normalized columns (fit on train): {', '.join(num_cols)}")
     else:
         norm_stats = {"mu": {}, "sigma": {}}
         print("No normalization applied (no valid columns listed in normalize.txt)")

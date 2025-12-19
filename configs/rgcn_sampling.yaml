@@ -7,7 +7,7 @@ graph_type: base
 save_graph: ""
 load_graph: "base12m.pt"
 time_window: 6
-model_type: rgcnmodel
+model_type: rgcn
 data_path: data/datasets/
 graph_dir: src/graph/
 model_dir: src/models/

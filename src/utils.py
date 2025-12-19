@@ -5,6 +5,7 @@ from torch_geometric.data import HeteroData
 import logging
 from typing import Optional
 import numpy as np
+import pandas as pd
 
 try:
     from torch_geometric.profile.utils import get_data_size  # available in recent PyG
@@ -160,6 +161,35 @@ def move_graph_to_device(graph, device):
     for edge_type in graph.edge_types:
         graph[edge_type].edge_index = graph[edge_type].edge_index.to(device)
     return graph
+
+
+################ NORMALIZATION ####################
+def normalize_with_idx(arr, fit_idx):
+    """Normalize array with mean/std fitted on fit_idx rows; returns (normalized, mean, std_safe)."""
+    arr = np.asarray(arr, dtype=np.float32)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    fit_idx = np.asarray(fit_idx, dtype=int)
+    if fit_idx.size == 0:
+        fit_idx = np.arange(arr.shape[0], dtype=int)
+    mu = arr[fit_idx].mean(axis=0, keepdims=True)
+    std = arr[fit_idx].std(axis=0, keepdims=True)
+    std = np.where(std == 0, 1.0, std)
+    std_safe = std + 1e-6
+    normalized = (arr - mu) / std_safe
+    return normalized, mu, std_safe
+
+
+def hhmm_to_minutes(hhmm):
+    """Convert HHMM integer/str to minutes since midnight; safe for NaNs."""
+    if pd.isna(hhmm):
+        return 0
+    try:
+        hhmm_int = int(hhmm)
+    except Exception:
+        return 0
+    hours = hhmm_int // 100
+    minutes = hhmm_int % 100
+    return hours * 60 + minutes
 
 ################ TRAINING/VALIDATION/TESTING STATS ####################
 def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start, logger):

@@ -1,15 +1,15 @@
 from src.config import get_args
 from src.graph.base import BaseGraph
-from src.graph.heteroNew import HeteroNewGraph
-from src.graph.heteroNew2 import HeteroNewGraph2
-from src.graph.heteroNew3 import HeteroNewGraph3
+from src.graph.hetero1 import HeteroGraph1
+from src.graph.hetero2 import HeteroGraph2
+from src.graph.hetero3 import HeteroGraph3
 from src.graph.not_very_hetero import NotVeryHetero
-from src.graph.homogeneousGraph import HomoGraph
-from src.models.dummymodel import DummyModel
+from src.graph.homo import HomoGraph
+from src.models.dummy import DummyModel
 from src.models.heterosage import HeteroSAGE
-from src.models.hgtmodel import HGT
-from src.models.rgcnmodel import RGCN
-from src.models.rgcn_norelu import RGCNNoReLU
+from src.models.hgt import HGT
+from src.models.rgcn import RGCN
+from src.models.leakyrgcn import LeakyRGCN
 from src.train import train
 from src.test import test
 from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats, print_available_memory
@@ -54,19 +54,19 @@ def main():
         if args.graph_type == "base":
             graph = BaseGraph(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
-        elif args.graph_type == "heteroNew":
-            graph = HeteroNewGraph(df, args, train_index, val_index, test_index, norm_stats).build()
+        elif args.graph_type == "hetero1":
+            graph = HeteroGraph1(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
-        elif args.graph_type == "heteroNew2":
-            graph = HeteroNewGraph2(df, args, train_index, val_index, test_index, norm_stats).build()
+        elif args.graph_type == "hetero2":
+            graph = HeteroGraph2(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
-        elif args.graph_type == "heteroNew3":
-            graph = HeteroNewGraph3(df, args, train_index, val_index, test_index, norm_stats).build()
+        elif args.graph_type == "hetero3":
+            graph = HeteroGraph3(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
         elif args.graph_type == "not_very_hetero":
             graph = NotVeryHetero(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
-        elif args.graph_type == "homogeneousGraph":
+        elif args.graph_type == "homo":
             graph = HomoGraph(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
         else:
@@ -100,7 +100,7 @@ def main():
     if args.model_type == "none":
         print("Not using any model, this is just for testing the surrounding code and graph building")
         return
-    elif args.model_type == "dummymodel":
+    elif args.model_type == "dummy":
         print("Using model: dummy")
         out_channels = 1
         model = DummyModel(
@@ -120,7 +120,7 @@ def main():
             num_layers=2,
             dropout=0.2,
         ).to(device)
-    elif args.model_type == "rgcnmodel":
+    elif args.model_type == "rgcn":
         print("Using model: rgcn")
         out_channels = 1
         print("out_channels:", out_channels)
@@ -132,10 +132,10 @@ def main():
             num_layers=2,
             dropout=0.2,
         ).to(device)
-    elif args.model_type == "rgcn_norelu":
-        print("Using model: rgcn_norelu")
+    elif args.model_type == "leakyrgcn":
+        print("Using model: leakyrgcn")
         out_channels = 1
-        model = RGCNNoReLU(
+        model = LeakyRGCN(
             metadata=metadata,
             in_channels_dict=in_channels_dict,
             hidden_channels=128,
@@ -143,7 +143,7 @@ def main():
             num_layers=2,
             dropout=0.2,
         ).to(device)
-    elif args.model_type == "hgtmodel":
+    elif args.model_type == "hgt":
         print("Using model: hgt")
         out_channels = 1
         model = HGT(

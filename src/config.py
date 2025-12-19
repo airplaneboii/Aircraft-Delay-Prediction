@@ -4,17 +4,17 @@ import glob
 
 # Default values for CLI
 DEFAULT_MODE = "train"
-DEFAULT_GRAPH_TYPE = "heteroNew2"#"base"
-DEFAULT_MODEL_TYPE = "rgcnmodel"#"none"
+DEFAULT_GRAPH_TYPE = "hetero3"
+DEFAULT_MODEL_TYPE = "rgcn"
 DEFAULT_MODEL_FILENAME = None
 DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_GRAPH_DIR = "src/graph/"
 DEFAULT_MODEL_DIR = "src/models/"
 DEFAULT_EPOCHS = 500
-DEFAULT_BATCH_SIZE = 131072
+DEFAULT_BATCH_SIZE = 150000
 DEFAULT_LR = 1e-3
 DEFAULT_WEIGHT_DECAY = 1e-6
-DEFAULT_PREDICTION_TYPE = "classification"#"regression"#"classification"
+DEFAULT_PREDICTION_TYPE = "classification" # "regression"
 DEFAULT_CLASS_BORDER = 0.45
 DEFAULT_TIME_WINDOW = 6
 DEFAULT_NEIGHBOR_SAMPLING = False
@@ -59,7 +59,7 @@ def get_args():
                         help="Optional: limit the number of rows to load from the CSV (for quick tests).")    
     
     # Graphs and graph parameters 
-    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "heteroNew", "heteroNew2", "heteroNew3", "not_very_hetero", "homogeneousGraph"], default=DEFAULT_GRAPH_TYPE,
+    parser.add_argument("-g", "--graph_type", type=str, choices=["base", "hetero1", "hetero2", "hetero3", "not_very_hetero", "homo"], default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=None,
                         help="Filename to save the built graph to (e.g., 'graph.pt'; default: None, don't save)")
@@ -69,7 +69,7 @@ def get_args():
                         help=f"Time window (hours) for temporal edges (default: {DEFAULT_TIME_WINDOW})")
     
     # Available models
-    parser.add_argument("-t", "--model_type", type=str, choices=["none", "dummymodel", "rgcnmodel", "rgcn_norelu", "hgtmodel", "heterosage"],
+    parser.add_argument("-t", "--model_type", type=str, choices=["none", "dummy", "rgcn", "leakyrgcn", "hgt", "heterosage"],
                         default=DEFAULT_MODEL_TYPE, help=f"Type of model to use (default: {DEFAULT_MODEL_TYPE})")
     parser.add_argument("-D", "--data_path", type=str, default=DEFAULT_DATA_PATH,
                         help=f"Path to a specific dataset file (default: auto-select latest from {DEFAULT_DATA_PATH})")

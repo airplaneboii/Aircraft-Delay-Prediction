@@ -2,18 +2,18 @@
 # This config demands ~6700MB of VRAM. Other settings match defaults.
 mode: train
 rows: null
-graph_type: heteroNew3
+graph_type: hetero2
 save_graph: ""
-load_graph: "new3_12m.pt"
-model_file: rgcn_norelu_new3_12m
-model_type: rgcn_norelu
+load_graph: "hetero2_12m.pt"
+model_file: leakyrgcn_hetero2_12m
+model_type: leakyrgcn
 data_path: data/datasets/12M_20251213_112224.csv
 graph_dir: src/graph/
 model_dir: src/models/
-epochs: 50
-lr: 0.001
+epochs: 500
+lr: 0.0005
 prediction_type: regression
-batch_size: 150000
+batch_size: 200000
 neighbor_sampling: true
-neighbor_fanouts: "15,10"
+neighbor_fanouts: "10,30,10,20"
 verbosity: 1

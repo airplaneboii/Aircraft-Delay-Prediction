@@ -4,6 +4,7 @@ from torch_geometric.data import HeteroData
 import pandas as pd
 import logging
 import time
+from src.utils import normalize_with_idx, hhmm_to_minutes
 
 class NotVeryHetero:
     """
@@ -22,13 +23,6 @@ class NotVeryHetero:
     - temporal_window: flights departing within same hour (system-wide signal)
     """
 
-    def normalize_features(self, x):
-        x = np.asarray(x, dtype=np.float32)
-        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        mean = x.mean(axis=0, keepdims=True)
-        std = x.std(axis=0, keepdims=True) + 1e-6
-        return (x - mean) / std
-
     def __init__(self, df, args, train_index, val_index, test_index, norm_stats=None):
         self.df = df
         self.args = args
@@ -37,14 +31,6 @@ class NotVeryHetero:
         self.test_index = test_index
         self.norm_stats = norm_stats
         self.classification = args.prediction_type == "classification"
-
-    def hhmm_to_minutes(self, hhmm):
-        if pd.isna(hhmm):
-            return 0
-        hhmm = int(hhmm)
-        hours = hhmm // 100
-        minutes = hhmm % 100
-        return hours * 60 + minutes
 
     def build(self):
         data = HeteroData()
@@ -59,33 +45,33 @@ class NotVeryHetero:
                 columns={'YEAR': 'year', 'MONTH': 'month', 'DAY_OF_MONTH': 'day'}
             )
         )
-        self.df["DEP_TIME_MINUTES"] = self.df["CRS_DEP_TIME"].apply(self.hhmm_to_minutes)
+        self.df["DEP_TIME_MINUTES"] = self.df["CRS_DEP_TIME"].apply(hhmm_to_minutes)
+        train_df = self.df.iloc[self.train_index]
         logger.debug(f"[NotVeryHetero] Date/time preprocessing: {time.time() - start:.2f}s")
 
         # ===== EFFICIENT STATISTICS PRECOMPUTATION =====
         start = time.time()
         logger.debug("[NotVeryHetero] Computing origin airport statistics...")
-        origin_agg = self.df.groupby("ORIGIN_AIRPORT_ID").agg({
+        origin_agg = train_df.groupby("ORIGIN_AIRPORT_ID").agg({
             "DEP_DELAY": ["mean", "std", "median"],
             "TAXI_OUT": "mean",
         }).fillna(0)
         origin_agg.columns = ['_'.join(col).strip() for col in origin_agg.columns.values]
-        
-        origin_counts = self.df.groupby("ORIGIN_AIRPORT_ID").size()
+        origin_counts = train_df.groupby("ORIGIN_AIRPORT_ID").size()
         logger.debug(f"[NotVeryHetero] Origin airport stats: {time.time() - start:.2f}s ({len(origin_counts)} airports)")
 
         start = time.time()
         logger.debug("[NotVeryHetero] Computing destination airport statistics...")
-        dest_agg = self.df.groupby("DEST_AIRPORT_ID").agg({
+        dest_agg = train_df.groupby("DEST_AIRPORT_ID").agg({
             "ARR_DELAY": ["mean", "std", "median"],
         }).fillna(0)
         dest_agg.columns = ['_'.join(col).strip() for col in dest_agg.columns.values]
-        dest_counts = self.df.groupby("DEST_AIRPORT_ID").size()
+        dest_counts = train_df.groupby("DEST_AIRPORT_ID").size()
         logger.debug(f"[NotVeryHetero] Destination airport stats: {time.time() - start:.2f}s")
 
         start = time.time()
         logger.debug("[NotVeryHetero] Computing aircraft statistics...")
-        aircraft_agg = self.df.groupby("TAIL_NUM").agg({
+        aircraft_agg = train_df.groupby("TAIL_NUM").agg({
             "DEP_DELAY": ["mean", "std"],
         }).fillna(0)
         aircraft_agg.columns = ['_'.join(col).strip() for col in aircraft_agg.columns.values]
@@ -93,7 +79,7 @@ class NotVeryHetero:
 
         start = time.time()
         logger.debug("[NotVeryHetero] Computing airline statistics...")
-        airline_agg = self.df.groupby("OP_CARRIER_AIRLINE_ID").agg({
+        airline_agg = train_df.groupby("OP_CARRIER_AIRLINE_ID").agg({
             "DEP_DELAY": ["mean", "std"],
             "DIVERTED": "mean",
         }).fillna(0)
@@ -145,31 +131,32 @@ class NotVeryHetero:
         tail_nums = flight_features["TAIL_NUM"].values
         airline_ids = flight_features["OP_CARRIER_AIRLINE_ID"].values
 
-        features_dict["origin_dep_delay_mean"] = origin_agg.loc[origin_ids, "DEP_DELAY_mean"].values
-        features_dict["origin_dep_delay_std"] = origin_agg.loc[origin_ids, "DEP_DELAY_std"].values
-        features_dict["origin_dep_delay_median"] = origin_agg.loc[origin_ids, "DEP_DELAY_median"].values
-        features_dict["origin_taxi_out"] = origin_agg.loc[origin_ids, "TAXI_OUT_mean"].values
-        features_dict["origin_num_deps"] = np.log1p(origin_counts.loc[origin_ids].values)
+        features_dict["origin_dep_delay_mean"] = origin_agg.reindex(origin_ids).fillna(0)["DEP_DELAY_mean"].values
+        features_dict["origin_dep_delay_std"] = origin_agg.reindex(origin_ids).fillna(0)["DEP_DELAY_std"].values
+        features_dict["origin_dep_delay_median"] = origin_agg.reindex(origin_ids).fillna(0)["DEP_DELAY_median"].values
+        features_dict["origin_taxi_out"] = origin_agg.reindex(origin_ids).fillna(0)["TAXI_OUT_mean"].values
+        features_dict["origin_num_deps"] = np.log1p(origin_counts.reindex(origin_ids).fillna(0).values)
 
-        features_dict["dest_arr_delay_mean"] = dest_agg.loc[dest_ids, "ARR_DELAY_mean"].values
-        features_dict["dest_arr_delay_std"] = dest_agg.loc[dest_ids, "ARR_DELAY_std"].values
-        features_dict["dest_num_arrs"] = np.log1p(dest_counts.loc[dest_ids].values)
+        features_dict["dest_arr_delay_mean"] = dest_agg.reindex(dest_ids).fillna(0)["ARR_DELAY_mean"].values
+        features_dict["dest_arr_delay_std"] = dest_agg.reindex(dest_ids).fillna(0)["ARR_DELAY_std"].values
+        features_dict["dest_num_arrs"] = np.log1p(dest_counts.reindex(dest_ids).fillna(0).values)
 
-        features_dict["aircraft_dep_delay_mean"] = aircraft_agg.loc[tail_nums, "DEP_DELAY_mean"].values
-        features_dict["aircraft_dep_delay_std"] = aircraft_agg.loc[tail_nums, "DEP_DELAY_std"].values
-        features_dict["aircraft_num_flights"] = np.log1p(self.df.groupby("TAIL_NUM").size().loc[tail_nums].values)
+        features_dict["aircraft_dep_delay_mean"] = aircraft_agg.reindex(tail_nums).fillna(0)["DEP_DELAY_mean"].values
+        features_dict["aircraft_dep_delay_std"] = aircraft_agg.reindex(tail_nums).fillna(0)["DEP_DELAY_std"].values
+        features_dict["aircraft_num_flights"] = np.log1p(train_df.groupby("TAIL_NUM").size().reindex(tail_nums).fillna(0).values)
 
-        features_dict["airline_dep_delay_mean"] = airline_agg.loc[airline_ids, "DEP_DELAY_mean"].values
-        features_dict["airline_dep_delay_std"] = airline_agg.loc[airline_ids, "DEP_DELAY_std"].values
-        features_dict["airline_diverted_rate"] = airline_agg.loc[airline_ids, "DIVERTED_mean"].values
+        features_dict["airline_dep_delay_mean"] = airline_agg.reindex(airline_ids).fillna(0)["DEP_DELAY_mean"].values
+        features_dict["airline_dep_delay_std"] = airline_agg.reindex(airline_ids).fillna(0)["DEP_DELAY_std"].values
+        features_dict["airline_diverted_rate"] = airline_agg.reindex(airline_ids).fillna(0)["DIVERTED_mean"].values
         logger.debug(f"[NotVeryHetero] Aggregated statistics lookup: {time.time() - start:.2f}s")
 
         # Stack all features
         start = time.time()
         logger.debug("[NotVeryHetero] Stacking and normalizing features...")
         feature_matrix = np.column_stack([features_dict[k] for k in features_dict.keys()])
-        feature_matrix = self.normalize_features(feature_matrix)
-        flight_arr = feature_matrix
+        # Normalize using training flights only
+        fit_idx = np.asarray(self.train_index, dtype=int)
+        flight_arr, _, _ = normalize_with_idx(feature_matrix, fit_idx)
         logger.debug(f"[NotVeryHetero] Feature normalization and stacking: {time.time() - start:.2f}s (shape: {flight_arr.shape})")
 
         data["flight"].x = torch.tensor(flight_arr, dtype=torch.float)

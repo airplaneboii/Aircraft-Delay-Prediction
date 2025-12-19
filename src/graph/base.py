@@ -3,16 +3,9 @@ import numpy as np
 from torch_geometric.data import HeteroData
 from sklearn.preprocessing import OneHotEncoder
 import pandas as pd
+from src.utils import normalize_with_idx, hhmm_to_minutes
 
 class BaseGraph:
-
-    # Normalizes features by removing NaNs and scaling to zero mean and unit variance
-    def normalize_features(self, x):
-        x = np.asarray(x, dtype=np.float32)
-        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        mean = x.mean(axis=0, keepdims=True)
-        std = x.std(axis=0, keepdims=True) + 1e-6  # prevent division by zero
-        return (x - mean) / std
 
     def __init__(self, df, args, train_index, val_index, test_index, norm_stats=None):
         self.df = df
@@ -24,14 +17,6 @@ class BaseGraph:
         self.classification = args.prediction_type == "classification"
 
     
-    def hhmm_to_minutes(self, hhmm):
-        if pd.isna(hhmm):
-            return 0
-        hhmm = int(hhmm)
-        hours = hhmm // 100
-        minutes = hhmm % 100
-        return hours * 60 + minutes
-
     def build(self):
         data = HeteroData()
 
@@ -120,9 +105,12 @@ class BaseGraph:
             airport_features.append(features)
             airport_wac.append(wac_onehot)
 
-        # Normalize airport features
+        # Normalize airport features using train airports
         airport_arr = np.array(airport_features, dtype=np.float32)
-        airport_arr = self.normalize_features(airport_arr)
+        train_airports = sorted(set(train_df["ORIGIN_AIRPORT_ID"]).union(set(train_df["DEST_AIRPORT_ID"])))
+        train_airport_idx = np.array([airport_map[a] for a in train_airports if a in airport_map], dtype=int)
+        fit_idx = train_airport_idx if len(train_airport_idx) > 0 else np.arange(len(airport_arr))
+        airport_arr, _, _ = normalize_with_idx(airport_arr, fit_idx)
         airport_wac = np.vstack(airport_wac).astype(np.float32)
         airport_arr = np.concatenate([airport_arr, airport_wac], axis=1)
 
@@ -162,9 +150,12 @@ class BaseGraph:
             ]
 
             aircraft_features.append(features)
-        # Normalize aircraft features
+        # Normalize aircraft features using train aircraft
         aircraft_arr = np.array(aircraft_features, dtype=np.float32)
-        aircraft_arr = self.normalize_features(aircraft_arr)
+        train_aircraft = sorted(train_df["TAIL_NUM"].unique())
+        train_aircraft_idx = np.array([aircraft_map[a] for a in train_aircraft if a in aircraft_map], dtype=int)
+        fit_idx = train_aircraft_idx if len(train_aircraft_idx) > 0 else np.arange(len(aircraft_arr))
+        aircraft_arr, _, _ = normalize_with_idx(aircraft_arr, fit_idx)
 
         
         ######## AIRLINE FEATURES #############
@@ -205,15 +196,18 @@ class BaseGraph:
             ]
 
             airline_features.append(features)
-        # Normalize airline features
+        # Normalize airline features using train airlines
         airline_arr = np.array(airline_features, dtype=np.float32)
-        airline_arr = self.normalize_features(airline_arr)
+        train_airlines = sorted(train_df["OP_CARRIER_AIRLINE_ID"].unique())
+        train_airline_idx = np.array([airline_map[a] for a in train_airlines if a in airline_map], dtype=int)
+        fit_idx = train_airline_idx if len(train_airline_idx) > 0 else np.arange(len(airline_arr))
+        airline_arr, _, _ = normalize_with_idx(airline_arr, fit_idx)
 
 
         ###### FLIGHT FEATURES ##########
 
         # Previous arrival delay for the same aircraft (temporal feature)
-        self.df["DEP_TIME_MINUTES"] = self.df["CRS_DEP_TIME"].apply(self.hhmm_to_minutes)
+        self.df["DEP_TIME_MINUTES"] = self.df["CRS_DEP_TIME"].apply(hhmm_to_minutes)
         df_sorted = self.df.sort_values(["TAIL_NUM", "FL_DATE", "DEP_TIME_MINUTES"]).copy()
         prev = df_sorted.groupby("TAIL_NUM")["ARR_DELAY"].shift(1).fillna(0)
         self.df["PREV_ARR_DELAY"] = prev.reindex(self.df.index).fillna(0)
@@ -230,8 +224,8 @@ class BaseGraph:
         ]].copy()
 
         # Convert CRS_DEP_TIME and CRS_ARR_TIME from HHMM to minutes since midnight
-        flight_features["CRS_DEP_TIME"] = flight_features["CRS_DEP_TIME"].apply(self.hhmm_to_minutes)
-        flight_features["CRS_ARR_TIME"] = flight_features["CRS_ARR_TIME"].apply(self.hhmm_to_minutes)
+        flight_features["CRS_DEP_TIME"] = flight_features["CRS_DEP_TIME"].apply(hhmm_to_minutes)
+        flight_features["CRS_ARR_TIME"] = flight_features["CRS_ARR_TIME"].apply(hhmm_to_minutes)
 
         # encode time features as cyclical features
         flight_features["dep_time_sin"] = np.sin(2 * np.pi * flight_features["CRS_DEP_TIME"] / (24 * 60))
@@ -254,8 +248,10 @@ class BaseGraph:
             "DAY_OF_WEEK",
             "MONTH"
         ])
-        # Normalize flight features
-        flight_arr = self.normalize_features(flight_features.values)
+        # Normalize flight features using train flights
+        flight_arr_raw = flight_features.values.astype(np.float32)
+        fit_idx = np.asarray(self.train_index, dtype=int)
+        flight_arr, _, _ = normalize_with_idx(flight_arr_raw, fit_idx)
 
         # Assign node features
         data["airport"].x = torch.tensor(airport_arr, dtype=torch.float)

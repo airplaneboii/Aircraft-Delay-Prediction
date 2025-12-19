@@ -2,14 +2,14 @@
 # Leave `data_path` blank to rely on auto-selection or pass `--data_path` on CLI
 mode: train
 rows: null
-graph_type: heteroNew
+graph_type: hetero1
 save_graph: ""
-load_graph: "new12m.pt"
-model_type: dummymodel
+load_graph: "hetero1_12m.pt"
+model_type: dummy
 data_path: ""
 graph_dir: src/graph/
 model_dir: src/models/
-model_file: dummy_new12m
+model_file: dummy_hetero1_12m
 epochs: 50
 lr: 0.001
 prediction_type: regression
@@ -18,5 +18,5 @@ neighbor_fanouts: ""
 verbosity: 1
 
 # Notes:
-# - This config demonstrates running the lightweight `dummymodel` on the full graph (no sampling).
+# - This config demonstrates running the lightweight `dummy` on the full graph (no sampling).
 # - Use `python main.py -c configs/dummy_nosample.yaml --data_path path/to/your.csv` to run.

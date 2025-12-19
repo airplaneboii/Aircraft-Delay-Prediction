@@ -1,7 +1,7 @@
 # Dummy model example (full-batch, no neighbor sampling)
 # Leave `data_path` blank to rely on auto-selection or pass `--data_path` on CLI
 mode: train
-model_type: dummymodel
+model_type: dummy
 data_path: ""
 graph_dir: src/graph/
 model_dir: src/models/
@@ -13,5 +13,5 @@ neighbor_fanouts: ""
 verbosity: 1
 
 # Notes:
-# - This config demonstrates running the lightweight `dummymodel` on the full graph (no sampling).
+# - This config demonstrates running the lightweight `dummy` on the full graph (no sampling).
 # - Use `python main.py -c configs/dummy_nosample.yaml --data_path path/to/your.csv` to run.
