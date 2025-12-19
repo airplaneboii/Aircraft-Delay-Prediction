@@ -176,56 +176,71 @@ def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses,
     if args.prediction_type == "regression":
         norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None)
         metrics_results = regression_metrics(labels_cat, preds_cat, norm_stats)
-        metrics_str = (
-            f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
-            f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
-        )
     else:
         metrics_results = classification_metrics(labels_cat, preds_cat, args)
-        metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
     avg_loss = sum(epoch_losses) / max(len(epoch_losses), 1)
 
     # Resource usage
-    gpu_mem_cur = None
     gpu_mem_peak = None
     if torch.cuda.is_available():
         try:
-            gpu_mem_cur = torch.cuda.memory_allocated() / 1024**2
             gpu_mem_peak = torch.cuda.max_memory_allocated() / 1024**2
         except Exception:
-            gpu_mem_cur = gpu_mem_peak = None
+            gpu_mem_peak = None
 
-    cpu_info = None
+    cpu_mem_mb = None
+    cpu_pct = None
     if psutil:
         try:
             p = psutil.Process()
-            mem_mb = p.memory_info().rss / 1024**2
+            cpu_mem_mb = p.memory_info().rss / 1024**2
             cpu_pct = psutil.cpu_percent(interval=None)
-            cpu_info = (mem_mb, cpu_pct)
         except Exception:
-            cpu_info = None
+            cpu_mem_mb = cpu_pct = None
 
-    # Build info parts based on mode
+    # Build structured stats dictionary
+    stats = {
+        "mode": mode,
+        "epoch": epoch + 1 if mode == "train" else None,
+        "loss": avg_loss,
+        "time_s": epoch_time,
+        "gpu_mem_mb": gpu_mem_peak,
+        "proc_mem_mb": cpu_mem_mb,
+        "cpu_pct": cpu_pct,
+    }
+    stats.update(metrics_results)
+
+    # Human-friendly log string
     info_parts = []
-    
     if mode == "train":
         info_parts.append(f"Epoch {epoch+1}/{args.epochs}")
     elif mode in ("val", "test"):
         info_parts.append(mode.upper())
-    
+
     info_parts.append(f"loss: {avg_loss:.4f}")
-    info_parts.append(metrics_str)
+    if args.prediction_type == "regression":
+        info_parts.append(
+            f"MSE: {metrics_results['MSE']:.4f}, MAE: {metrics_results['MAE']:.4f}, "
+            f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
+        )
+    else:
+        info_parts.append(
+            f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, "
+            f"Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
+        )
+
     info_parts.append(f"time: {epoch_time:.2f}s")
-    
+
     if gpu_mem_peak is not None:
         info_parts.append(f"gpu_mem: {gpu_mem_peak:.1f} MB")
-    
-    if cpu_info is not None:
-        info_parts.append(f"proc_mem: {cpu_info[0]:.1f} MB")
-        info_parts.append(f"cpu%: {cpu_info[1]:.1f}")
+
+    if cpu_mem_mb is not None and cpu_pct is not None:
+        info_parts.append(f"proc_mem: {cpu_mem_mb:.1f} MB")
+        info_parts.append(f"cpu%: {cpu_pct:.1f}")
 
     logger.info(" - ".join(info_parts))
+    return stats
 
 
 ################ GRAPH STATISTICS ####################

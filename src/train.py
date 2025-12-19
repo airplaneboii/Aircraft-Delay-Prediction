@@ -8,6 +8,7 @@ from torch_geometric.loader import NeighborLoader
 from torch_geometric.data import HeteroData
 import logging
 import os
+import csv
 from tqdm.auto import tqdm
 
 try:
@@ -80,13 +81,26 @@ def train(
     logger.info("Training start: %s", start_dt.isoformat())
 
     model_path = os.path.join(args.model_dir, f"{args.model_file}.pt")
-    model_bk_path = os.path.join(args.model_dir, f"{args.model_file}.bk.pt")
+    csv_path = os.path.join(args.model_dir, f"{args.model_file}_training_stats.csv")
 
-    # resume only from backup checkpoint (.bk.pt) when enabled
+    # Initialize CSV file for epoch statistics
+    csv_file = None
+    csv_writer = None
+    if args.prediction_type == "regression":
+        csv_headers = ["epoch", "loss", "MSE", "MAE", "RMSE", "R2", "time_s", "gpu_mem_mb", "proc_mem_mb", "cpu_pct"]
+    else:
+        csv_headers = ["epoch", "loss", "Accuracy", "Precision", "Recall", "F1_Score", "time_s", "gpu_mem_mb", "proc_mem_mb", "cpu_pct"]
+    
+    csv_file = open(csv_path, 'w', newline='', encoding='utf-8')
+    csv_writer = csv.DictWriter(csv_file, fieldnames=csv_headers)
+    csv_writer.writeheader()
+    logger.info(f"Training statistics will be logged to: {csv_path}")
+
+    # resume from checkpoint when enabled
     start_epoch = 0
-    if getattr(args, "resume", False) and os.path.exists(model_bk_path):
+    if getattr(args, "resume", False) and os.path.exists(model_path):
         try:
-            ckpt = torch.load(model_bk_path, map_location=device)
+            ckpt = torch.load(model_path, map_location=device)
             if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
                 model.load_state_dict(ckpt["model_state_dict"])
                 start_epoch = int(ckpt.get("epoch", 0))
@@ -95,9 +109,9 @@ def train(
                 if "scheduler_state_dict" in ckpt and scheduler is not None:
                     scheduler.load_state_dict(ckpt["scheduler_state_dict"])
                 args.norm_stats = ckpt.get("norm_stats", getattr(args, "norm_stats", None))
-                print(f"Resuming training from epoch {start_epoch+1}, loaded checkpoint {model_bk_path}")
+                print(f"Resuming training from epoch {start_epoch+1}, loaded checkpoint {model_path}")
         except Exception as e:
-            print(f"Warning: failed to load backup checkpoint {model_bk_path}: {e}")
+            print(f"Warning: failed to load checkpoint {model_path}: {e}")
 
     # AMP scaler (optional mixed precision)
     # Optional: AMP via torch.amp (CUDA-only)
@@ -262,10 +276,16 @@ def train(
         preds_cat = torch.cat(all_preds) if all_preds else torch.tensor([])
 
         # Compute metrics and log via shared helper
-        compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start, logger)
+        epoch_stats = compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start, logger)
 
-        # Save partial model state after each epoch
-        logging.debug(f"Saving backup checkpoint for epoch {epoch}/{args.epochs}")
+        # Write epoch stats to CSV using the returned dictionary
+        if csv_writer is not None and epoch_stats is not None:
+            csv_row = {key: epoch_stats.get(key) for key in csv_headers}
+            csv_writer.writerow(csv_row)
+            csv_file.flush()  # Ensure data is written immediately
+
+        # Save checkpoint after each epoch
+        logging.debug(f"Saving checkpoint for epoch {epoch+1}/{args.epochs}")
         try: 
             ckpt = {
                 "epoch": epoch,
@@ -274,22 +294,16 @@ def train(
                 "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
                 "norm_stats": getattr(args, "norm_stats", None),
             }
-            torch.save(ckpt, model_bk_path)
+            torch.save(ckpt, model_path)
         except Exception as e:
-            logger.warning(f"Failed to save checkpoint for epoch {epoch}: {e}")
-    # Save final checkpoint after training completes
-    try:
-        final_ckpt = {
-            "epoch": args.epochs,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
-            "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
-            "norm_stats": getattr(args, "norm_stats", None),
-        }
-        torch.save(final_ckpt, model_path)
-        logger.info("Saved final checkpoint to %s", model_path)
-    except Exception as e:
-        logger.warning("Failed to save final checkpoint: %s", e)
+            logger.warning(f"Failed to save checkpoint for epoch {epoch+1}: {e}")
+    # Close CSV file
+    if csv_file is not None:
+        csv_file.close()
+        logger.info(f"Training statistics saved to: {csv_path}")
+
+
+    logger.info("Training completed. Final checkpoint saved to %s", model_path)
 
     overall_end = time.time()
     end_dt = datetime.now()

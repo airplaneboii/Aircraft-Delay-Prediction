@@ -4,6 +4,7 @@ from src.graph.heteroNew import HeteroNewGraph
 from src.graph.heteroNew2 import HeteroNewGraph2
 from src.graph.heteroNew3 import HeteroNewGraph3
 from src.graph.not_very_hetero import NotVeryHetero
+from src.graph.homogeneousGraph import HomoGraph
 from src.models.dummymodel import DummyModel
 from src.models.heterosage import HeteroSAGE
 from src.models.hgtmodel import HGT
@@ -65,9 +66,11 @@ def main():
         elif args.graph_type == "not_very_hetero":
             graph = NotVeryHetero(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
+        elif args.graph_type == "homogeneousGraph":
+            graph = HomoGraph(df, args, train_index, val_index, test_index, norm_stats).build()
+            print_graph_stats(graph)
         else:
-            print(args.graph_type)
-            raise ValueError("Unsupported graph type.")
+            raise ValueError(f"Unsupported graph type: {args.graph_type}")
     
     # Save graph if requested
     if args.save_graph:
