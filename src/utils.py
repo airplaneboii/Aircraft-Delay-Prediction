@@ -181,7 +181,7 @@ def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses,
             f"RMSE: {metrics_results['RMSE']:.4f}, R2: {metrics_results['R2']:.4f}"
         )
     else:
-        metrics_results = classification_metrics(labels_cat, preds_cat)
+        metrics_results = classification_metrics(labels_cat, preds_cat, args)
         metrics_str = f"Accuracy: {metrics_results['Accuracy']:.4f}, Precision: {metrics_results['Precision']:.4f}, Recall: {metrics_results['Recall']:.4f}, F1_Score: {metrics_results['F1_Score']:.4f}"
 
     avg_loss = sum(epoch_losses) / max(len(epoch_losses), 1)
@@ -315,3 +315,36 @@ def print_graph_stats(data: HeteroData):
             print("Note: get_data_size() not available in this PyG version.")
     except Exception as e:
         print("Warning: failed to compute graph stats:", e)
+
+
+################ NEIGHBOR FANOUT RESOLUTION ####################
+def resolve_fanouts(model, fanouts):
+    """Resolve neighbor fanouts to match model depth.
+
+    - If model exposes `num_layers`, use that as depth; otherwise infer from `convs` length; fallback 1.
+    - If `fanouts` is None, return full-neighbor sampling `[-1] * depth`.
+    - If length mismatch, pad or trim to match depth.
+    """
+    depth = getattr(model, "num_layers", None)
+    if depth is None or depth <= 0:
+        convs = getattr(model, "convs", None)
+        try:
+            depth = len(convs) if convs is not None else 1
+        except Exception:
+            depth = 1
+
+    if fanouts is None:
+        return [-1] * depth
+
+    # normalize provided fanouts to depth
+    try:
+        length = len(fanouts)
+    except Exception:
+        return [-1] * depth
+
+    if length != depth and length > 0:
+        if length < depth:
+            fanouts = fanouts + [fanouts[-1]] * (depth - length)
+        else:
+            fanouts = fanouts[:depth]
+    return fanouts

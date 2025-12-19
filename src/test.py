@@ -3,9 +3,8 @@ from datetime import datetime
 import torch
 import pandas as pd
 import os
-from src.utils import regression_metrics, classification_metrics, compute_epoch_stats
+from src.utils import regression_metrics, classification_metrics, compute_epoch_stats, resolve_fanouts
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.data import HeteroData
 import logging
 from tqdm.auto import tqdm
 
@@ -29,46 +28,21 @@ def test(
     device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
     
-    # Detect if graph is heterogeneous or homogeneous
-    is_hetero = isinstance(graph, HeteroData)
-
     if args.mode == "val":
-        eval_mask = graph["flight"].val_mask if is_hetero else graph.val_mask
+        eval_mask = graph["flight"].val_mask
     elif args.mode == "test":
-        eval_mask = graph["flight"].test_mask if is_hetero else graph.test_mask
+        eval_mask = graph["flight"].test_mask
     else:
         raise ValueError(f"Invalid mode for testing: {args.mode}")
 
     eval_nodes = eval_mask.nonzero(as_tuple=False).view(-1)
 
     # Resolve neighbor fanouts similar to train
-    fanouts = getattr(args, "neighbor_fanouts", None)
-    # infer model depth
-    depth = getattr(model, "num_layers", None)
-    if depth is None:
-        convs = getattr(model, "convs", None)
-        if convs is not None:
-            try:
-                depth = len(convs)
-            except Exception:
-                depth = 1
-        else:
-            depth = 1
-
-    if fanouts is None:
-        fanouts = [-1] * depth
-    elif len(fanouts) != depth and len(fanouts) > 0:
-        if len(fanouts) < depth:
-            fanouts = fanouts + [fanouts[-1]] * (depth - len(fanouts))
-        else:
-            fanouts = fanouts[:depth]
+    fanouts = resolve_fanouts(model, getattr(args, "neighbor_fanouts", None))
 
     # Create loader if requested
     if use_neighbor_sampling:
-        if is_hetero:
-            input_nodes = ("flight", eval_nodes)
-        else:
-            input_nodes = eval_nodes
+        input_nodes = ("flight", eval_nodes)
         
         loader = NeighborLoader(
             graph,
@@ -89,43 +63,27 @@ def test(
             total_batches = len(loader) if hasattr(loader, "__len__") else None
             for batch_idx, batch in enumerate(tqdm(loader, total=total_batches, desc="Testing")):
                 batch = batch.to(device)
-                
-                if is_hetero:
-                    out = model(batch.x_dict, batch.edge_index_dict)
-                    flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
-                else:
-                    out = model(batch.x, batch.edge_index)
-                    flight_batch_size = batch.x.size(0)
+                out = model(batch.x_dict, batch.edge_index_dict)
+                flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
 
                 if args.prediction_type == "regression":
-                    if is_hetero:
-                        labels = batch["flight"].y.squeeze(-1)[:flight_batch_size]
-                    else:
-                        labels = batch.y.squeeze(-1)[:flight_batch_size]
+                    labels = batch["flight"].y.squeeze(-1)[:flight_batch_size]
                     preds = out.squeeze(-1)[:flight_batch_size]
                     all_labels.append(labels.detach().cpu())
                     all_preds.append(preds.detach().cpu())
                 else:
-                    if is_hetero:
-                        labels = batch["flight"].y.view(-1).long()[:flight_batch_size]
-                    else:
-                        labels = batch.y.view(-1).long()[:flight_batch_size]
+                    labels = batch["flight"].y.view(-1).float()[:flight_batch_size]
                     logits = out[:flight_batch_size]
-                    preds = torch.argmax(logits, dim=1)
+                    probs = torch.sigmoid(logits)
+                    preds = (probs >= args.border).long()
                     all_labels.append(labels.detach().cpu())
                     all_preds.append(preds.detach().cpu())
 
         else:
-            if is_hetero:
-                out = model(graph.x_dict, graph.edge_index_dict)
-            else:
-                out = model(graph.x, graph.edge_index)
+            out = model(graph.x_dict, graph.edge_index_dict)
             
             if args.prediction_type == "regression":
-                if is_hetero:
-                    labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
-                else:
-                    labels = graph.y.float().squeeze(-1)[eval_mask]
+                labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
                 preds = out.squeeze(-1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())

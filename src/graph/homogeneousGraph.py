@@ -12,6 +12,7 @@ class HomoGraph:
         self.val_index   = np.asarray(val_index, dtype=int)
         self.test_index  = np.asarray(test_index, dtype=int)
         self.norm_stats = norm_stats  # optional externally-provided stats
+        self.classification = args.prediction_type == "classification"
 
     def hhmm_to_minutes(self, hhmm):
         if pd.isna(hhmm):
@@ -154,8 +155,11 @@ class HomoGraph:
         edge_attr = np.concatenate([dep_cyc, arr_cyc, dow], axis=1).astype(np.float32)
         edge_store.edge_attr = torch.tensor(edge_attr, dtype=torch.float)
 
-        # ---------- Edge labels and split masks (edge-level regression) ----------
-        y = torch.tensor(self.df["ARR_DELAY"].fillna(0).to_numpy(dtype=np.float32)).unsqueeze(1)
+        # ---------- Edge labels and split masks (edge-level regression/classification) ----------
+        if self.classification:
+            y = torch.tensor(self.df["ARR_DEL15"].fillna(0).to_numpy(dtype=np.float32)).unsqueeze(1)
+        else:
+            y = torch.tensor(self.df["ARR_DELAY"].fillna(0).to_numpy(dtype=np.float32)).unsqueeze(1)
         edge_store.edge_label = y
 
         train_mask = torch.zeros(num_flights, dtype=torch.bool)

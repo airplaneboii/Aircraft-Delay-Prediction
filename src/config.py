@@ -21,6 +21,10 @@ DEFAULT_NEIGHBOR_SAMPLING = False
 DEFAULT_NEIGHBOR_FANOUTS = "15,10"
 DEFAULT_VERBOSITY_LEVEL = 1
 DEFAULT_CRITERION = "huber"
+DEFAULT_AMP = False
+DEFAULT_COMPILE = False
+DEFAULT_COMPILE_BACKEND = "inductor"
+DEFAULT_COMPILE_MODE = "default"
 
 
 def str2bool(v):
@@ -77,6 +81,17 @@ def get_args():
                         help=f"Filename (without extension) to save or load the model (default: model name)")
     parser.add_argument("--criterion", type=str, choices=["mse", "huber", "l1"], default=DEFAULT_CRITERION,
                         help="Loss criterion to use for training (default: l1)")
+    # Performance features
+    parser.add_argument("--amp", action="store_true", default=DEFAULT_AMP,
+                        help="Enable PyTorch AMP (mixed precision) on CUDA (default: disabled)")
+    parser.add_argument("--compile", action="store_true", default=DEFAULT_COMPILE,
+                        help="Compile the model with torch.compile for speed (default: disabled)")
+    parser.add_argument("--compile_backend", type=str, default=DEFAULT_COMPILE_BACKEND,
+                        help="Backend for torch.compile (e.g., 'inductor')")
+    parser.add_argument("--compile_mode", type=str, default=DEFAULT_COMPILE_MODE,
+                        help="Mode for torch.compile (e.g., 'default', 'reduce-overhead', 'max-autotune')")
+    parser.add_argument("--resume", action="store_true", default=False,
+                        help="Resume training from a .bk.pt checkpoint if available (default: disabled)")
     
     # Training parameters
     parser.add_argument("-e", "--epochs", type=int, default=DEFAULT_EPOCHS,
