@@ -5,6 +5,7 @@ from src.graph.hetero2 import HeteroGraph2
 from src.graph.hetero3 import HeteroGraph3
 from src.graph.not_very_hetero import NotVeryHetero
 from src.graph.homo import HomoGraph
+from src.graph.hetero2nodes import Hetero2Nodes
 from src.models.dummy import DummyModel
 from src.models.heterosage import HeteroSAGE
 from src.models.hgt import HGT
@@ -68,6 +69,9 @@ def main():
             print_graph_stats(graph)
         elif args.graph_type == "homo":
             graph = HomoGraph(df, args, train_index, val_index, test_index, norm_stats).build()
+            print_graph_stats(graph)
+        elif args.graph_type == "hetero2nodes":
+            graph = Hetero2Nodes(df, args, train_index, val_index, test_index, norm_stats).build()
             print_graph_stats(graph)
         else:
             raise ValueError(f"Unsupported graph type: {args.graph_type}")
