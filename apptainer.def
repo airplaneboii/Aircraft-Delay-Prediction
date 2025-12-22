@@ -29,6 +29,11 @@ From: ubuntu:24.04
         python3 /app/setup_env.py --venv-dir /opt/venv
     fi
 
+    # Final cleanup to reduce image size
+    echo "Final cleanup..."
+    rm -rf /tmp/* /var/tmp/* ~/.cache || true
+    apt-get clean && rm -rf /var/lib/apt/lists/* || true
+
 %environment
     export LC_ALL=C
     export PYTHONUNBUFFERED=1

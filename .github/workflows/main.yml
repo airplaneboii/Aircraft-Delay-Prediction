@@ -25,7 +25,7 @@ jobs:
       - name: Build SIF
         run: |
           mkdir -p dist
-          apptainer build --fakeroot dist/aircraft-delay.sif apptainer.def
+          apptainer build --cleanup --fakeroot dist/aircraft-delay.sif apptainer.def
 
       - name: Publish release and upload SIF
         uses: softprops/action-gh-release@v2
