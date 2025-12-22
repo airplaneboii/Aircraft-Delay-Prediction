@@ -16,16 +16,14 @@ From: ubuntu:24.04
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip \
         build-essential git curl ca-certificates \
-        libaio1 libssl-dev libffi-dev \
+        libaio-dev libssl-dev libffi-dev \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-    # If the build context provided setup_env.sh, make it executable and run it
+    # Run setup_env.sh to install Python packages at build time
     if [ -f /app/setup_env.sh ]; then
         chmod +x /app/setup_env.sh
         echo "Running /app/setup_env.sh to install Python packages at build time..."
         /app/setup_env.sh
-    else
-        echo "/app/setup_env.sh not found in image; skipping Python package install."
     fi
 
 %environment
@@ -35,11 +33,6 @@ From: ubuntu:24.04
     export PIP_DISABLE_PIP_VERSION_CHECK=1
     export PATH="/usr/local/bin:$PATH"
     export PYTHONPATH="/app:$PYTHONPATH"
-
-%apprun setup
-    # run setup from the bind-mounted /app — use python3 explicitly
-    cd /app
-    exec python3 /app/setup_env.py "$@"
 
 %runscript
     cd /app
