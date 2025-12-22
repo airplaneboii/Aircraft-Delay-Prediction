@@ -1,0 +1,29 @@
+name: build-apptainer
+
+on:
+  push:
+    branches: [ development ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Apptainer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apptainer
+
+      - name: Build SIF
+        run: |
+          mkdir -p dist
+          apptainer build --fakeroot dist/aircraft-delay.sif apptainer.def
+
+      - name: Upload SIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apptainer-sif
+          path: dist/aircraft-delay.sif
+          if-no-files-found: error
