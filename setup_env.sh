@@ -13,7 +13,7 @@ echo " - Torch: ${TORCH_VER}"
 echo " - CUDA tag: ${CUDA_VER}"
 
 echo "Upgrading pip, setuptools, wheel..."
-$PYTHON_BIN -m pip install --break-system-packages --upgrade pip setuptools wheel
+$PYTHON_BIN -m pip install --break-system-packages --upgrade --ignore-installed pip
 
 echo "Installing PyTorch (${TORCH_VER}, ${CUDA_VER})..."
 $PYTHON_BIN -m pip install --break-system-packages "torch==${TORCH_VER}" --index-url "https://download.pytorch.org/whl/${CUDA_VER}"
