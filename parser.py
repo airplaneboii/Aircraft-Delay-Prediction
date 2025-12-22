@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm, trange
 from colorama import Fore, Style, init
 from datetime import datetime, timedelta
-from splitter import split_file_to_list, format_list
+from data.splitter import split_file_to_list, format_list
 
 # Initialize colorama (needed on Windows)
 init(autoreset=True)
@@ -21,9 +21,9 @@ DEFAULT_END_YEAR = 2017
 DEFAULT_END_MONTH = 1
 DEFAULT_GEOGRAPHY = "All"
 DEFAULT_INTERVAL = 60
-DEFAULT_FIELD_FILE = "fields2.txt"
-DATA_DIR = "zipped"
-LOOKUP_DIR = "lookup"
+DEFAULT_FIELD_FILE = "data/fields2.txt"
+DEFAULT_DATA_DIR = "data/zipped"
+DEFAULT_LOOKUP_DIR = "data/lookup"
 
 def fetch_initial_page(base_url, query_params):
     """Stage 1: Perform the initial GET request to the TranStats page."""
@@ -149,7 +149,7 @@ def month_year_iter(start_year, start_month, end_year, end_month):
 
 def run_downloads(soup, session, full_url, base_url, data_dir,
                   start_year, start_month, end_year, end_month,
-                  geography, data_fields, request_interval):
+                  geography, data_fields, request_interval, prefix=""):
     print(f"{Fore.MAGENTA}Selected Date Range: {start_year}-{start_month} to {end_year}-{end_month}{Style.RESET_ALL}")
 
     aspnet_fields = extract_aspnet_state_fields(soup)
@@ -161,7 +161,8 @@ def run_downloads(soup, session, full_url, base_url, data_dir,
 
     for idx, (year, month) in enumerate(months, start=1):
         payload = prepare_post_payload(aspnet_fields, year, month, geography, data_fields, soup)
-        filename = f"{year}_{month:02d}_{geography}.zip"
+        prefix_str = f"{prefix}_" if prefix else ""
+        filename = f"{prefix_str}{year}_{month:02d}_{geography}.zip"
         size_mb = send_post_request_and_download(
             base_url, payload, session, full_url,
             filename, idx, total_files, data_dir
@@ -294,6 +295,12 @@ def main():
                         help=f"Request interval in seconds between downloads to avoid rate-limiting (default: {DEFAULT_INTERVAL})")
     parser.add_argument("-F", "--data-fields", type=str, default=DEFAULT_FIELD_FILE,
                         help=f"Path to file containing comma- or newline-separated field names (default: {DEFAULT_FIELD_FILE})")
+    parser.add_argument("-p", "--prefix", type=str, default="",
+                        help="Optional prefix to add to downloaded ZIP filenames (e.g. 'DATASET')")
+    parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR,
+                        help=f"Directory to save downloaded ZIP files (default: {DEFAULT_DATA_DIR})")
+    parser.add_argument("--lookup-dir", type=str, default=DEFAULT_LOOKUP_DIR,
+                        help=f"Directory to save lookup tables (default: {DEFAULT_LOOKUP_DIR})")
 
     args = parser.parse_args()
 
@@ -304,7 +311,7 @@ def main():
         exit(1)
 
     if args.mode == "lookup":
-        download_lookup_tables(soup, session, full_url, BASE_URL, LOOKUP_DIR)
+        download_lookup_tables(soup, session, full_url, BASE_URL, args.lookup_dir)
 
     elif args.mode == "md":
         rows = extract_from_mytable(soup)
@@ -321,14 +328,15 @@ def main():
         run_downloads(
             soup, session, full_url,
             BASE_URL,
-            DATA_DIR,
+            args.data_dir,
             args.start_year,
             args.start_month,
             args.end_year,
             args.end_month,
             args.geography,
             DATA_FIELDS,
-            args.interval
+            args.interval,
+            prefix=args.prefix
         )
 
 if __name__ == "__main__":

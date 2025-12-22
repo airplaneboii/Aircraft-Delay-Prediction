@@ -7,7 +7,7 @@ import argparse
 import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
-from splitter import split_file_to_list
+from data.splitter import split_file_to_list
 from colorama import Fore, Style, init
 
 # Initialize colorama (needed on Windows)
@@ -17,13 +17,13 @@ init(autoreset=True)
 pd.set_option('future.no_silent_downcasting', True)
 
 # Default values for CLI (used in help strings)
-DEFAULT_INPUT_DIR = "zipped"
-DEFAULT_UNZIP_DIR = "unzipped"
-DEFAULT_MERGED_DIR = "datasets"
+DEFAULT_INPUT_DIR = "data/zipped"
+DEFAULT_UNZIP_DIR = "data/unzipped"
+DEFAULT_MERGED_DIR = "data/datasets"
 DEFAULT_OUTPUT_PREFIX = "DATASET"
 DEFAULT_CHUNKSIZE = 0
-DEFAULT_ESSENTIAL_COLS = "essential.txt"
-DEFAULT_DTYPE_FILE = "dtypes.yaml"
+DEFAULT_ESSENTIAL_COLS = "data/essential.txt"
+DEFAULT_DTYPE_FILE = "data/dtypes.yaml"
 
 
 def fast_count_rows(path, buf_size=1024*1024):
@@ -47,7 +47,7 @@ def fast_count_rows(path, buf_size=1024*1024):
         return None
     
 
-def select_by_date(file_paths, start_year=None, start_month=None, end_year=None, end_month=None):
+def select_by_date(file_paths, start_year=None, start_month=None, end_year=None, end_month=None, prefix=""):
     """Select files whose basename starts with YEAR[_-]MONTH using provided range.
 
     Args:
@@ -58,9 +58,16 @@ def select_by_date(file_paths, start_year=None, start_month=None, end_year=None,
         Sorted list of file paths that match the pattern and fall inside the range.
     """
     selected = []
+    # Build regex that optionally allows a prefix followed by an underscore or hyphen
+    if prefix:
+        esc = re.escape(prefix)
+        pattern = rf"^(?:{esc}[_-])?(\d{{4}})[_-]?(\d{{1,2}})"
+    else:
+        pattern = r"^(\d{4})[_-]?(\d{1,2})"
+
     for p in file_paths:
         bn = os.path.basename(p)
-        m = re.match(r"^(\d{4})[_-]?(\d{1,2})", bn)
+        m = re.match(pattern, bn)
         if not m:
             continue
         year = int(m.group(1))
@@ -363,6 +370,8 @@ def main():
                         help="End year (e.g. 2018) for filtering files by name")
     parser.add_argument("-M2", "--end-month", type=int, default=None,
                         help="End month (1-12) for filtering files by name")
+    parser.add_argument("-p", "--prefix", type=str, default="",
+                        help="Optional prefix for ZIP/CSV filenames (e.g. 'DATASET'); when provided, files starting with this prefix_ will be considered")
     args = parser.parse_args()
 
 
@@ -420,10 +429,10 @@ def main():
 
     # Collect zip paths, perform selection
     zip_paths = sorted(glob.glob(os.path.join(args.input_dir, "*.zip")))
-    selected_zip_paths = select_by_date(zip_paths, start_year, start_month, end_year, end_month)
+    selected_zip_paths = select_by_date(zip_paths, start_year, start_month, end_year, end_month, prefix=args.prefix)
     # Collect existing and expected CSV files, perform selection
     existing_csvs = sorted(glob.glob(os.path.join(args.unzip_dir, "*.csv")))
-    selected_existing_csvs = select_by_date(existing_csvs, start_year, start_month, end_year, end_month)
+    selected_existing_csvs = select_by_date(existing_csvs, start_year, start_month, end_year, end_month, prefix=args.prefix)
     expected_csvs = [os.path.join(args.unzip_dir, os.path.splitext(os.path.basename(z))[0] + ".csv") for z in selected_zip_paths]
     # Union while preserving order: existing selected first, then expected new ones
     display_csvs = list(selected_existing_csvs)
@@ -485,7 +494,7 @@ def main():
 
     # Recompute available CSVs post-unzip and filter
     available_csvs = sorted(glob.glob(os.path.join(args.unzip_dir, "*.csv")))
-    selected_csvs = select_by_date(available_csvs, start_year, start_month, end_year, end_month)
+    selected_csvs = select_by_date(available_csvs, start_year, start_month, end_year, end_month, prefix=args.prefix)
 
     if not selected_csvs:
         tqdm.write(f"{Fore.YELLOW}No CSV files to merge after filtering.{Style.RESET_ALL}")
