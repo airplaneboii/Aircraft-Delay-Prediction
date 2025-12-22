@@ -32,7 +32,9 @@ def main():
     graph = None
     graph_loaded = False
     if args.load_graph:
-        graph_path = os.path.join(args.graph_dir, args.load_graph)
+        # Handle graph paths with or without .pt extension
+        graph_filename = args.load_graph if args.load_graph.endswith(".pt") else f"{args.load_graph}.pt"
+        graph_path = os.path.join(args.graph_dir, graph_filename)
         if os.path.exists(graph_path):
             print(f"Loading graph from {graph_path}...")
             # weights_only=False required for PyG HeteroData objects
@@ -81,7 +83,9 @@ def main():
     
     # Save graph if requested (do not overwrite if we loaded an existing graph)
     if args.save_graph and not graph_loaded:
-        graph_path = os.path.join(args.graph_dir, args.save_graph)
+        # Handle graph paths with or without .pt extension
+        graph_filename = args.save_graph if args.save_graph.endswith(".pt") else f"{args.save_graph}.pt"
+        graph_path = os.path.join(args.graph_dir, graph_filename)
         print(f"Saving graph to {graph_path}...")
         torch.save(graph, graph_path)
         print("Graph saved successfully.")
