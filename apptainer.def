@@ -6,6 +6,9 @@ From: ubuntu:24.04
     Project: Aircraft-Delay-Prediction
     Base: ubuntu:24.04
 
+%files
+    setup_env.sh /app/setup_env.sh
+
 %post
     #!/bin/sh
     set -eu
@@ -16,7 +19,17 @@ From: ubuntu:24.04
         libaio1 libssl-dev libffi-dev \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+    # If the build context provided setup_env.sh, make it executable and run it
+    if [ -f /app/setup_env.sh ]; then
+        chmod +x /app/setup_env.sh
+        echo "Running /app/setup_env.sh to install Python packages at build time..."
+        /app/setup_env.sh
+    else
+        echo "/app/setup_env.sh not found in image; skipping Python package install."
+    fi
+
 %environment
+    export LC_ALL=C
     export PYTHONUNBUFFERED=1
     export PYTHONDONTWRITEBYTECODE=1
     export PIP_DISABLE_PIP_VERSION_CHECK=1
