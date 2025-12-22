@@ -5,8 +5,8 @@ set -e
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEF_FILE="${SCRIPT_DIR}/apptainer.def"
-OUTPUT_DIR="${SCRIPT_DIR}"
+DEF_FILE="${SCRIPT_DIR}/apptainer/apptainer.def"
+OUTPUT_DIR="${SCRIPT_DIR}/apptainer"
 OUTPUT_FILE="${OUTPUT_DIR}/aircraft-delay.sif"
 TORCH_VER="${TORCH_VER:-2.8.0}"
 CUDA_VER="${CUDA_VER:-cu129}"
@@ -87,7 +87,7 @@ Usage: $0 [OPTIONS]
 Options:
     -t, --torch-ver VERSION    PyTorch version (default: 2.8.0)
     -c, --cuda-ver VERSION     CUDA version (default: cu129, use 'cpu' for CPU-only)
-    -o, --output FILE          Output SIF file path (default: aircraft-delay.sif)
+    -o, --output FILE          Output SIF file path (default: apptainer/aircraft-delay.sif)
     -h, --help                 Show this help message
 
 Examples:

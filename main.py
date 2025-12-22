@@ -29,12 +29,14 @@ def main():
     
     # Load or build graph
     graph = None
+    graph_loaded = False
     if args.load_graph:
         graph_path = os.path.join(args.graph_dir, args.load_graph)
         if os.path.exists(graph_path):
             print(f"Loading graph from {graph_path}...")
             # weights_only=False required for PyG HeteroData objects
             graph = torch.load(graph_path, weights_only=False)
+            graph_loaded = True
             print_graph_stats(graph)
         else:
             print(f"Graph file not found at {graph_path}. Building from scratch...")
@@ -76,8 +78,8 @@ def main():
         else:
             raise ValueError(f"Unsupported graph type: {args.graph_type}")
     
-    # Save graph if requested
-    if args.save_graph:
+    # Save graph if requested (do not overwrite if we loaded an existing graph)
+    if args.save_graph and not graph_loaded:
         graph_path = os.path.join(args.graph_dir, args.save_graph)
         print(f"Saving graph to {graph_path}...")
         torch.save(graph, graph_path)
