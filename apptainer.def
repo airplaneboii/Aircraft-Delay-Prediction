@@ -24,6 +24,9 @@ From: ubuntu:24.04
         chmod +x /app/setup_env.sh
         echo "Running /app/setup_env.sh to install Python packages at build time..."
         /app/setup_env.sh
+    elif [ -f /app/setup_env.py ]; then
+        echo "setup_env.sh not found, using setup_env.py as fallback..."
+        python3 /app/setup_env.py --venv-dir /opt/venv
     fi
 
 %environment

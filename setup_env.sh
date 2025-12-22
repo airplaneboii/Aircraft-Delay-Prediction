@@ -13,23 +13,23 @@ echo " - Torch: ${TORCH_VER}"
 echo " - CUDA tag: ${CUDA_VER}"
 
 echo "Upgrading pip, setuptools, wheel..."
-$PYTHON_BIN -m pip install --upgrade pip setuptools wheel
+$PYTHON_BIN -m pip install --break-system-packages --upgrade pip setuptools wheel
 
 echo "Installing PyTorch (${TORCH_VER}, ${CUDA_VER})..."
-$PYTHON_BIN -m pip install "torch==${TORCH_VER}" --index-url "https://download.pytorch.org/whl/${CUDA_VER}"
+$PYTHON_BIN -m pip install --break-system-packages "torch==${TORCH_VER}" --index-url "https://download.pytorch.org/whl/${CUDA_VER}"
 
 echo "Installing PyG extension wheels (pyg_lib, torch_scatter, torch_sparse, torch_cluster, torch_spline_conv)..."
-$PYTHON_BIN -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv \
+$PYTHON_BIN -m pip install --break-system-packages pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv \
   -f "https://data.pyg.org/whl/torch-${TORCH_VER}+${CUDA_VER}.html"
 
 echo "Installing torch-geometric..."
-$PYTHON_BIN -m pip install torch-geometric
+$PYTHON_BIN -m pip install --break-system-packages torch-geometric
 
 echo "Installing DeepSNAP from GitHub..."
-$PYTHON_BIN -m pip install git+https://github.com/snap-stanford/deepsnap.git
+$PYTHON_BIN -m pip install --break-system-packages git+https://github.com/snap-stanford/deepsnap.git
 
 echo "Installing utility libraries..."
-$PYTHON_BIN -m pip install pandas tqdm colorama requests beautifulsoup4 scikit-learn pyyaml
+$PYTHON_BIN -m pip install --break-system-packages pandas tqdm colorama requests beautifulsoup4 scikit-learn pyyaml
 
 echo "Cleaning pip cache (best-effort)..."
 ${PYTHON_BIN} -m pip cache purge || true
