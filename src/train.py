@@ -81,7 +81,7 @@ def train(
     logger.info("Training start: %s", start_dt.isoformat())
 
     model_path = os.path.join(args.model_dir, f"{args.model_file}.pt")
-    csv_path = os.path.join(args.model_dir, f"{args.model_file}_training_stats.csv")
+    csv_path = os.path.join(args.log_dir, f"{args.model_file}_training_stats.csv")
 
     # Initialize CSV file for epoch statistics
     csv_file = None

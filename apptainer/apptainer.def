@@ -7,7 +7,9 @@ From: ubuntu:24.04
     Base: ubuntu:24.04
 
 %files
-    setup_env.sh /app/setup_env.sh
+    apptainer/setup_env.sh /app/setup_env.sh
+    main.py /app/main.py
+    src/ /app/src/
 
 %post
     #!/bin/sh

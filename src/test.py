@@ -158,7 +158,7 @@ def test(
                     df["pred_raw"] = unnorm_pred
 
                 model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
-                out_dir = getattr(args, "model_dir", ".")
+                out_dir = getattr(args, "log_dir", None) or getattr(args, "model_dir", ".")
                 os.makedirs(out_dir, exist_ok=True)
                 out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
                 df.to_csv(out_path, index=False)
@@ -188,7 +188,7 @@ def test(
                 })
 
                 model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
-                out_dir = getattr(args, "model_dir", ".")
+                out_dir = getattr(args, "log_dir", None) or getattr(args, "model_dir", ".")
                 os.makedirs(out_dir, exist_ok=True)
                 out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
                 df.to_csv(out_path, index=False)

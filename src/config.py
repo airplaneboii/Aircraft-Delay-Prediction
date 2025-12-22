@@ -8,8 +8,9 @@ DEFAULT_GRAPH_TYPE = "hetero3"
 DEFAULT_MODEL_TYPE = "rgcn"
 DEFAULT_MODEL_FILENAME = None
 DEFAULT_DATA_PATH = "data/datasets/"
-DEFAULT_GRAPH_DIR = "src/graph/"
-DEFAULT_MODEL_DIR = "src/models/"
+DEFAULT_GRAPH_DIR = "pretrained/graphs/"
+DEFAULT_MODEL_DIR = "pretrained/models/"
+DEFAULT_LOG_DIR = "logs/"
 DEFAULT_EPOCHS = 500
 DEFAULT_BATCH_SIZE = 150000
 DEFAULT_LR = 1e-3
@@ -77,6 +78,8 @@ def get_args():
                         help=f"Directory to save or load graphs (default: {DEFAULT_GRAPH_DIR})")
     parser.add_argument("-M", "--model_dir", type=str, default=DEFAULT_MODEL_DIR,
                         help=f"Directory to save or load models (default: {DEFAULT_MODEL_DIR})")    
+    parser.add_argument("--log_dir", type=str, default=DEFAULT_LOG_DIR,
+                        help=f"Directory to write training logs and predictions (default: {DEFAULT_LOG_DIR})")
     parser.add_argument("-F", "--model_file", type=str, default=DEFAULT_MODEL_FILENAME,
                         help=f"Filename (without extension) to save or load the model (default: model name)")
     parser.add_argument("--criterion", type=str, choices=["mse", "huber", "l1"], default=DEFAULT_CRITERION,
@@ -180,5 +183,6 @@ def get_args():
     # Ensure directories exist
     os.makedirs(args.graph_dir, exist_ok=True)
     os.makedirs(args.model_dir, exist_ok=True)
+    os.makedirs(args.log_dir, exist_ok=True)
 
     return args
