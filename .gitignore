@@ -2,4 +2,5 @@ data/datasets
 data/unzipped
 __pycache__/
 *.pt
+*.csv
 venv
