@@ -25,8 +25,8 @@ $PYTHON_BIN -m pip install --break-system-packages pyg_lib torch_scatter torch_s
 echo "Installing torch-geometric..."
 $PYTHON_BIN -m pip install --break-system-packages torch-geometric
 
-echo "Installing DeepSNAP from GitHub..."
-$PYTHON_BIN -m pip install --break-system-packages git+https://github.com/snap-stanford/deepsnap.git
+#echo "Installing DeepSNAP from GitHub..."
+#$PYTHON_BIN -m pip install --break-system-packages git+https://github.com/snap-stanford/deepsnap.git
 
 echo "Installing utility libraries..."
 $PYTHON_BIN -m pip install --break-system-packages pandas tqdm colorama requests beautifulsoup4 scikit-learn pyyaml
