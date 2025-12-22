@@ -15,7 +15,6 @@ from src.train import train
 from src.test import test
 from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats, print_available_memory
 from data.data_loader import load_data
-import torch
 import os
 
 def main():
@@ -27,6 +26,8 @@ def main():
     ensure_dir(args.graph_dir)
     ensure_dir(args.model_dir)
     
+    # lazy import torch for a quicker help command
+    import torch
     # Load or build graph
     graph = None
     graph_loaded = False
