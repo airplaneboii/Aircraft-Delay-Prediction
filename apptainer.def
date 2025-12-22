@@ -1,0 +1,32 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    Author: you
+    Project: Aircraft-Delay-Prediction
+    Base: ubuntu:24.04
+
+%post
+    set -euo pipefail
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
+        build-essential git curl ca-certificates \
+        libaio1 libssl-dev libffi-dev \
+        && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+%environment
+    export PYTHONUNBUFFERED=1
+    export PYTHONDONTWRITEBYTECODE=1
+    export PIP_DISABLE_PIP_VERSION_CHECK=1
+    export PATH="/usr/local/bin:$PATH"
+    export PYTHONPATH="/app:$PYTHONPATH"
+
+%apprun setup
+    cd /app
+    chmod +x ./setup_env
+    exec ./setup_env
+
+%runscript
+    cd /app
+    exec python3 "$@"
