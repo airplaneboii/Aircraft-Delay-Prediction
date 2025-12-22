@@ -65,6 +65,6 @@ APPRUN() {
 }
 
 # Example: run training (you can replace or pass different args)
-srun APPRUN -c /app/configs/heter1_hgt.yaml
-srun APPRUN -c /app/configs/heter1_hgt.yaml -m val
-srun APPRUN -c /app/configs/heter1_hgt.yaml -m test
+srun APPRUN -c /app/configs/hetero1_hgt_regression.yaml
+srun APPRUN -c /app/configs/hetero1_hgt_regression.yaml -m val
+srun APPRUN -c /app/configs/hetero1_hgt_regression.yaml -m test
