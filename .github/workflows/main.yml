@@ -1,12 +1,15 @@
-name: build-apptainer
+name: build-and-publish-apptainer
 
 on:
   push:
     branches: [ development ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +27,9 @@ jobs:
           mkdir -p dist
           apptainer build --fakeroot dist/aircraft-delay.sif apptainer.def
 
-      - name: Upload SIF artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish release and upload SIF
+        uses: softprops/action-gh-release@v2
         with:
-          name: apptainer-sif
-          path: dist/aircraft-delay.sif
-          if-no-files-found: error
+          tag_name: dev-${{ github.run_number }}
+          name: dev-${{ github.run_number }}
+          files: dist/aircraft-delay.sif
