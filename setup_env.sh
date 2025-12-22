@@ -33,7 +33,5 @@ $PYTHON_BIN -m pip install --break-system-packages pandas tqdm colorama requests
 
 echo "Cleaning pip cache and temporary files..."
 ${PYTHON_BIN} -m pip cache purge || true
-rm -rf /tmp/* /var/tmp/* ~/.cache/pip || true
-find /usr/local/lib -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 echo "setup_env.sh finished."
