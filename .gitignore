@@ -1,7 +1,9 @@
 data/datasets
 data/unzipped
 __pycache__/
+venv
 logs
+pretrained
 *.pt
 *.csv
-venv
+*.sif
