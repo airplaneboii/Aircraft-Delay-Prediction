@@ -12,133 +12,134 @@ While you can technically run the models on the CPU, it's best to use a GPU.
 Currently only NVIDIA GPUs are supported. While pytorch already supports AMD GPUs on Linux, PyG does not (although this might change in the future). 
 In the meantime you can use a custom build found here: https://github.com/Looong01/pyg-rocm-build, though in that case you'll need to install everything manually or tweak the `setup_env.py` script.
 
-## Setting up the environment
-Clone the repository:
+## Environment Setup
+Clone the project and use our python script to create a venv and install dependencies:
 ```bash
 git clone https://github.com/airplaneboii/Aircraft-Delay-Prediction.git
+cd Aircraft-Delay-Prediction
+python setup_env.py
 ```
-It's recommended to use a python virtual environment (some operating systems don't even support global python environments anymore).
-We have a script that will create it automatically and install all needed packages, simply run:
+The script prints the activation command for your OS. You can customize the env dir, Torch and CUDA versions, see:
+`python setup_env.py -h`
+
+## Data Pipeline
+We provide two helpers: `parser.py` (downloads monthly TranStats ZIPs) and `merge.py` (unzips, filters, cleans, converts dtypes, and merges CSVs).
+
+### Download ZIPs (from project root)
+The parser has multiple modes:
+- `data`: download flight data ZIPs
+- `lookup`: download lookup tables into `data/lookup/`
+- `md`: emit fields + descriptions as Markdown
+- `ids`: emit available field IDs in chosen format
+
+For a full list of available options, run:
 ```bash
-python setup_env.py 
+python parser.py -h
 ```
-There are some pretty large packages so this could take a while.
 
-To use a custom directory name, torch version or CUDA version, you can set them through command line arguments. See `python setup_env.py -h`.
-
-Depending on your OS, activating the environment may be different. The script will tell you how to do it, 
-but for more details you can follow the instructions here: https://docs.python.org/3/library/venv.html#how-venvs-work
-
-## Fetching data
-Since we can only download one month of data at a time from [Transtats](https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=),
-we wrote a dedicated parser to easily get the data in bulk. The script has multiple modes:
-1) data - parsing the flight data
-2) lookup - parsing lookup tables
-3) md - parsing available fields and their descriptions in markdown format
-4) ids - parsing a list of available fields
-
-The modes can be configured via arguments, to see all options change into the data directory (important!) and run:
+Example (Nov 2017 → Jan 2018, using a field list):
 ```bash
-cd data
-python parser.py --help
+python parser.py -m data -Y1 2017 -M1 11 -Y2 2018 -M2 1 -F data/fields1.txt
 ```
-```
-usage: parser.py [-h] [-m {data,lookup,md,ids}] [-is] [-f {newline,quoted-newline-comma,comma,quoted-comma}] [-u URL] [-Y1 START_YEAR] [-M1 START_MONTH]
-                 [-Y2 END_YEAR] [-M2 END_MONTH] [-g GEOGRAPHY] [-i INTERVAL] [-F DATA_FIELDS]
-
-TranStats bulk downloader and field extractor
-
-options:
-  -h, --help            show this help message and exit
-  -m, --mode {data,lookup,md,ids}
-                        Select 'data' to download ZIPs, 'lookup' for lookup tables, 'md' for Markdown field table, or 'ids' for formatted ID list
-  -is, --include-separators
-                        Include separator rows in Markdown output (only applies to mode=md)
-  -f, --format {newline,quoted-newline-comma,comma,quoted-comma}
-                        Formatting style for ID list (only applies to mode=ids)
-  -u, --url URL         URL of the page to scrape for field metadata
-  -Y1, --start-year START_YEAR
-                        Start year (default: 2017)
-  -M1, --start-month START_MONTH
-                        Start month (default: 1)
-  -Y2, --end-year END_YEAR
-                        End year (default: 2017)
-  -M2, --end-month END_MONTH
-                        End month (default: 1)
-  -g, --geography GEOGRAPHY
-                        Geography filter (default: All)
-  -i, --interval INTERVAL
-                        Request interval in seconds between downloads to avoid rate-limiting (default: 60)
-  -F, --data-fields DATA_FIELDS
-                        Path to file containing comma- or newline-separated field names (default: fields2.txt)
-
-```
-The list of all available fields (`fields_all.txt`), the description table (`legend.md`) and the lookup tables (in `lookup`) are already in the repository.
-The datasets however are too large to store on GitHub so they either have to be merged from the zip files provided in `zipped`, or parsed again.
-
-For parsing data you have to provide a date range as descriped in help, and a text file that contains a list of fields you want to parse. Currently there are 3 templates, the default being `fields2.txt`. The fields in the provided files are separated by newlines for readability, but multiple separators are supported and should be detected automatically. As an example here's how to parse fields `fields1.txt` from November 2017 to January 2018 (inclusive):
+Optional zip filename prefix (helps later filtering):
 ```bash
-python parser.py -m data -Y1 2017 -M1 11 -Y2 2018 -M2 1 -F fields1.txt
+python parser.py -m data -Y1 2017 -M1 11 -Y2 2018 -M2 1 -F data/fields1.txt -p SF
 ```
-To use the data, the CSVs need to extracted and merged. The `merge.py` helper unzips TranStats ZIPs, optionally filters by date, cleans and converts dtypes, and merges CSVs into a single dataset.
+
+### Unzip and Merge CSVs
+`merge.py` merges selected data and writes merged datasets to `data/datasets/`.
 
 Usage modes and options:
-
-- Normal (default): unzip any matching ZIPs from `data/zipped/` into `data/unzipped/`, then merge available CSVs into `data/datasets/`.
-- `--unzip-only`: only extract ZIP files (no merge).
-- `--merge-only`: only merge existing CSVs in `--unzip-dir` (no extraction).
-- `--dry-run`: display which ZIPs/CSVs would be processed, then exit.
-- Date filtering: use `--start-year`, `--start-month`, `--end-year`, `--end-month` to select a contiguous inclusive range of files named like `YYYY_MM...`.
-- `--essential-cols PATH`: drop rows missing the listed essential columns (file with one column name per line)
-- `--dtypes-file PATH`: YAML mapping of column -> dtype to apply conversions (skipped if missing or empty).
-- Output naming: merged file is written to `--merged-dir` (default `data/datasets/`) with prefix `--output-prefix` and a timestamp (so multiple runs produce distinct files).
-
-For a full list of available arguments, run `python merge.py -h`.
-
-Examples:
-
+- Normal mode: unzip matching ZIPs from `data/zipped/` → merge available CSVs from `data/unzipped/`.
+- `--unzip-only` or `--merge-only` to run a single phase.
+- `--dry-run` to preview what would be processed.
+- Date range selection via `--start-year/--start-month/--end-year/--end-month`.
+- Prefix filtering via `--prefix PREFIX`: when provided, only files starting with `PREFIX_` or `PREFIX-` are considered at both unzip and merge stages.
+- Optional cleaning via `--essential-cols` and dtype conversion via `--dtypes-file`.
+For a full list of available options, run:
 ```bash
-# Default: unzip+merge everything found in data/zipped/ and data/unzipped/
-python merge.py
-
-# Only show what would be done (no changes):
+python parser.py -h
+```
+Examples:
+```bash
+# Preview
 python merge.py --dry-run
 
-# Only extract ZIPs in a given input dir:
-python merge.py --input-dir my_zips --unzip-only
+# Merge a date range
+python merge.py -Y1 2017 -M1 11 -Y2 2018 -M2 1
 
-# Merge only existing CSVs (skip unzipping):
-python merge.py --merge-only --unzip-dir data/unzipped
+# Only merge files that start with "SF_" in the date range
+python merge.py -Y1 2017 -M1 11 -Y2 2018 -M2 1 --prefix SF
 
-# Merge a specific date range (Nov 2017 - Jan 2018) and apply dtype mapping:
-python merge.py -Y1 2017 -M1 11 -Y2 2018 -M2 1 --dtypes-file data/dtypes.yaml
+# Apply dtype conversions
+python merge.py --dtypes-file data/dtypes.yaml
 ```
 
-**Don't forget to change back to the project directory when you're done dealing with data!**
-
 ---
-## Running the main program
-
-Model training, validation and testing is all performed by running `main.py` with command line arguments to configure parameters. To get a comprehensive list, run:
+## Training and Evaluation
+Run `main.py` directly or via a config file. It's recommended to use a config file for ease of use. For all available options run:
 ```bash
 python main.py -h
 ```
-Example:
+
+### Using configs (recommended)
+Config files are stored in `configs/`, the config with all the default values being `configs/defaults.yaml`.
 ```bash
-python main.py --mode train --model_type rgcn --epochs 100 --lr 0.0005
+python main.py -c configs/hetero3_rgcn_class.yaml
 ```
-However it is recommended to use config files instead, as there are a lot of arguments and it becomes difficult to manage. There are examples in the `configs` folder. To use a config file, run:
+You can override any option from CLI:
 ```bash
-python main.py -c path/to/config/file
+python main.py -c configs/hetero3_rgcn_class.yaml --mode test --neighbor_sampling
 ```
-You don't have to set all available arguments in your config file, the unused arguments will be set to their default values, which can be seen in `configs/defaults.yaml`. Both JSON and YAML files are supported. If you want to override some config file arguments, you can still do that:
+
+### Graph and model files
+- Graphs directory: `pretrained/graphs/`
+- Models directory: `pretrained/models/`
+- Provide graph/model names without extension (the code appends `.pt`).
+
+Examples:
 ```bash
-python main.py -c path/to/config/file --mode test --neighbor_sampling
+# Build a graph and save it
+python main.py -c configs/hetero3_rgcn_class.yaml -s hetero3_class
+
+# Load a saved graph and train a model
+python main.py -c configs/hetero3_rgcn_class.yaml -l hetero3_class --mode train
+
+# Evaluate using the latest dataset in data/datasets/
+python main.py -c configs/hetero3_rgcn_class.yaml --mode test
 ```
-This example would take all values from the config file, but replace the mode and neighbor sampling values with the ones provided in the command line.
+
+### Available options
+- Graph types: `base`, `hetero1`, `hetero2`, `hetero3`, `not_very_hetero`, `homo`, `hetero2nodes`
+- Model types: `dummy`, `heterosage`, `rgcn`, `leakyrgcn`, `hgt`
+- Neighbor sampling: `--neighbor_sampling` with `--neighbor_fanouts 15,10`
+- Classification threshold: `--border` (see configs)
+
+Logs and predictions are written to `logs/`. By default, `data_path` auto-selects the most recent file in `data/datasets/`, 
+unless a specific path is specified.
 
 ---
-## Editing
-To add model, add new `.py` code of your model to `src/models/` folder. To add graph, add new `.py` code of your model to `src/graph/` folder. Following python structure of other models/graphs is strongly encouraged. Additionally, filename should be added to argument list in `src/config.py`. Simmilarly, `main.py` should be updated (new `elif` option should be properly added).
+## Repository Structure
+Key directories and files:
 
-Before submitting new model or graph, make sure code runs without errors, failures and warnings.
+- configs/: YAML configs for main.py
+- data/: data storage (datasets/, zipped/, unzipped/, lookup/) and data loading and conversion specifications (normalize.txt, essential.txt, dtypes.yaml etc.)
+- logs/: training logs and predictions
+- pretrained/: pretrained graphs and models
+- src/: most of the code (config.py, train.py, test.py, utils.py, graph/, models/)
+- data parsing and merging: merge.py, parser.py
+- main program: main.py, 
+- environment setup: setup_env.py
+- container setup files: apptainer.def, setup_env.sh, build_apptainer.sh
+- SLURM batch jobs: hetero1.sbatch, hetero3.sbatch, run.sbatch
+
+---
+## Cluster/Container Notes
+- SLURM: see the provided `*.sbatch` scripts for examples.
+- Apptainer: see `apptainer.def` and `build_apptainer.sh` to build a container that matches the Python/CUDA stack.
+
+---
+## Contributing
+To add a model, place a new module under `src/models/` and register it in `main.py`. To add a graph builder, add a module under `src/graph/` and register it similarly. Also expose new CLI options in `src/config.py` as needed.
+
+Please ensure code runs cleanly before submitting (no errors/warnings).

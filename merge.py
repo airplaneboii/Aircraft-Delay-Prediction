@@ -58,10 +58,10 @@ def select_by_date(file_paths, start_year=None, start_month=None, end_year=None,
         Sorted list of file paths that match the pattern and fall inside the range.
     """
     selected = []
-    # Build regex that optionally allows a prefix followed by an underscore or hyphen
+    # Build regex that requires a prefix followed by an underscore or hyphen when provided
     if prefix:
         esc = re.escape(prefix)
-        pattern = rf"^(?:{esc}[_-])?(\d{{4}})[_-]?(\d{{1,2}})"
+        pattern = rf"^(?:{esc}[_-])(\d{{4}})[_-]?(\d{{1,2}})"
     else:
         pattern = r"^(\d{4})[_-]?(\d{1,2})"
 
