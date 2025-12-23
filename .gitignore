@@ -1,6 +1,7 @@
 data/datasets
 data/unzipped
 __pycache__/
+logs
 *.pt
 *.csv
 venv

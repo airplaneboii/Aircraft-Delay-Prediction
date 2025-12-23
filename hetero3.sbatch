@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=train_template          # Job name
+#SBATCH --job-name=hetero3          # Job name
 #SBATCH --partition=gpu               # Partition (queue)
 #SBATCH --gres=gpu                    # Request GPU
 #SBATCH --nodes=1                     # Number of nodes
 #SBATCH --ntasks=1                    # Number of tasks
 #SBATCH --cpus-per-task=8             # CPU cores per task
-#SBATCH --mem=64G                     # Memory
-#SBATCH --time=2:00:00               # Walltime
+#SBATCH --mem=100G                     # Memory
+#SBATCH --time=12:00:00               # Walltime
 #SBATCH --output="logs/%x_%j.log"       # Stdout
 #SBATCH --error="logs/%x_%j.log"        # Stderr
 
@@ -57,7 +57,7 @@ echo "===== STARTING TRAINING (Apptainer only) ====="
 mkdir -p logs pretrained data configs
 
 # Helper function to run commands inside the SIF with standard binds.
-# Usage: APPRUN <command> [args...]
+# Usage: RUN <command> [args...]
 RUN() {
 	apptainer exec --nv \
 		--bind "$APP_BIND","$DATA_BIND","$PRETRAINED_BIND","$LOGS_BIND","$CONFIGS_BIND" \
@@ -65,7 +65,16 @@ RUN() {
 }
 
 # Example: run training (you can replace or pass different args)
-RUN -c /app/configs/hetero1_hgt_reg.yaml
-RUN -c /app/configs/hetero1_hgt_reg.yaml -m val
-RUN -c /app/configs/hetero1_hgt_reg.yaml -m test
+RUN -c /app/configs/hetero3_hgt_reg.yaml
+RUN -c /app/configs/hetero3_hgt_reg.yaml -m val
+RUN -c /app/configs/hetero3_hgt_reg.yaml -m test
+RUN -c /app/configs/hetero3_hgt_class.yaml
+RUN -c /app/configs/hetero3_hgt_class.yaml -m val
+RUN -c /app/configs/hetero3_hgt_class.yaml -m test
 
+RUN -c /app/configs/hetero3_rgcn_reg.yaml
+RUN -c /app/configs/hetero3_rgcn_reg.yaml -m val
+RUN -c /app/configs/hetero3_rgcn_reg.yaml -m test
+RUN -c /app/configs/hetero3_rgcn_class.yaml
+RUN -c /app/configs/hetero3_rgcn_class.yaml -m val
+RUN -c /app/configs/hetero3_rgcn_class.yaml -m test
