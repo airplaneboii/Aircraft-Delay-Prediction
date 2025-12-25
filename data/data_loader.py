@@ -7,7 +7,7 @@ from .splitter import split_file_to_list
 from src.utils import hhmm_to_minutes
 
 # Suppress pandas FutureWarning about dtype assignment during normalization
-warnings.filterwarnings('ignore', category=FutureWarning, message='.*Setting an item of incompatible dtype.*')
+# warnings.filterwarnings('ignore', category=FutureWarning, message='.*Setting an item of incompatible dtype.*')
 
 
 def load_data(
@@ -22,13 +22,14 @@ def load_data(
     pred_window: int = 1,  # Length of prediction window in units
     window_stride: int = 1,  # Stride between windows in units
     normalize: bool = True,
-) -> tuple[pd.DataFrame, dict, list]:
+) -> tuple[pd.DataFrame, dict, list, dict]:
     """Load data and prepare for sliding window temporal training.
     
     Returns:
         df: Full dataframe sorted by time
         norm_stats: Normalization statistics
-        window_splits: List of (learn_indices, pred_indices) tuples for each training window
+        window_splits: Dict with keys 'train'/'val'/'test' -> list of window dicts
+        split_indices: Dict with numpy arrays for chronological split indices: {"train_idx","val_idx","test_idx"}
     """
     
     df = pd.read_csv(path)
@@ -107,8 +108,15 @@ def load_data(
                 
                 norm_stats["mu"] = {c: float(mu[c]) for c in num_cols}
                 norm_stats["sigma"] = {c: float(sigma_safe[c]) for c in num_cols}
-                print(f"Normalization complete. Example: ARR_DELAY μ={norm_stats['mu'].get('ARR_DELAY', 'N/A'):.2f}, "
-                      f"σ={norm_stats['sigma'].get('ARR_DELAY', 'N/A'):.2f}")
+                # Print all normalization statistics for visibility
+                print("Normalization complete. Per-column statistics (μ, σ):")
+                for c in num_cols:
+                    mu_val = norm_stats["mu"].get(c, "N/A")
+                    sigma_val = norm_stats["sigma"].get(c, "N/A")
+                    if isinstance(mu_val, (int, float)) and isinstance(sigma_val, (int, float)):
+                        print(f"  {c}: μ={mu_val:.4f}, σ={sigma_val:.4f}")
+                    else:
+                        print(f"  {c}: μ={mu_val}, σ={sigma_val}")
         except Exception as e:
             print(f"Warning: normalization failed: {e}")
     
@@ -117,12 +125,7 @@ def load_data(
     df.loc[train_indices, "split"] = "train"
     df.loc[val_indices, "split"] = "val"
     
-    # Create sliding windows for training using time units
-    train_df = df.iloc[train_indices].copy()
-    train_time_units = train_df["time_unit"].values
-    
-    min_unit = train_time_units.min()
-    max_unit = train_time_units.max()
+    # Create sliding windows for all splits (train, val, test)
     total_window_size = learn_window + pred_window
     
     print(f"\nSliding window configuration:")
@@ -131,40 +134,74 @@ def load_data(
     print(f"  Total window: {total_window_size} units ({total_window_size * unit} minutes)")
     print(f"  Stride: {window_stride} units ({window_stride * unit} minutes)")
     
-    # Generate sliding windows
-    window_splits = []
-    num_possible_windows = max(1, (max_unit - min_unit + 1 - total_window_size) // window_stride + 1)
+    def generate_windows_for_split(split_indices, split_name):
+        """Generate sliding windows for a given split."""
+        if len(split_indices) == 0:
+            return []
+        
+        split_df = df.iloc[split_indices].copy()
+        split_time_units = split_df["time_unit"].values
+        
+        min_unit = split_time_units.min()
+        max_unit = split_time_units.max()
+        
+        windows = []
+        num_possible_windows = max(1, (max_unit - min_unit + 1 - total_window_size) // window_stride + 1)
+        
+        for i in range(num_possible_windows):
+            window_start = min_unit + i * window_stride
+            learn_end = window_start + learn_window
+            pred_end = learn_end + pred_window
+            
+            if pred_end > max_unit + 1:
+                break
+            
+            # Get indices for learn and pred windows
+            learn_mask = (split_time_units >= window_start) & (split_time_units < learn_end)
+            pred_mask = (split_time_units >= learn_end) & (split_time_units < pred_end)
+            
+            learn_idx = split_indices[learn_mask]
+            pred_idx = split_indices[pred_mask]
+            
+            if len(learn_idx) > 0 and len(pred_idx) > 0:
+                windows.append({
+                    'window_id': len(windows),
+                    'split': split_name,
+                    'learn_indices': learn_idx,
+                    'pred_indices': pred_idx,
+                    'time_range': (window_start, pred_end - 1),
+                    'learn_count': len(learn_idx),
+                    'pred_count': len(pred_idx),
+                })
+        
+        return windows
     
-    for i in range(num_possible_windows):
-        window_start = min_unit + i * window_stride
-        learn_end = window_start + learn_window
-        pred_end = learn_end + pred_window
-        
-        if pred_end > max_unit + 1:
-            break
-        
-        # Get indices for learn and pred windows
-        learn_mask = (train_time_units >= window_start) & (train_time_units < learn_end)
-        pred_mask = (train_time_units >= learn_end) & (train_time_units < pred_end)
-        
-        learn_idx = train_indices[learn_mask]
-        pred_idx = train_indices[pred_mask]
-        
-        if len(learn_idx) > 0 and len(pred_idx) > 0:
-            window_splits.append({
-                'window_id': len(window_splits),
-                'learn_indices': learn_idx,
-                'pred_indices': pred_idx,
-                'time_range': (window_start, pred_end - 1),
-                'learn_count': len(learn_idx),
-                'pred_count': len(pred_idx),
-            })
+    # Generate windows for each split
+    train_windows = generate_windows_for_split(train_indices, 'train')
+    val_windows = generate_windows_for_split(val_indices, 'val')
+    test_windows = generate_windows_for_split(test_indices, 'test')
     
-    print(f"Generated {len(window_splits)} training windows")
-    if window_splits:
-        print(f"  First window: units [{window_splits[0]['time_range'][0]}, {window_splits[0]['time_range'][1]}], "
-              f"learn={window_splits[0]['learn_count']}, pred={window_splits[0]['pred_count']}")
-        print(f"  Last window: units [{window_splits[-1]['time_range'][0]}, {window_splits[-1]['time_range'][1]}], "
-              f"learn={window_splits[-1]['learn_count']}, pred={window_splits[-1]['pred_count']}")
+    # Collect all windows
+    window_splits = {
+        'train': train_windows,
+        'val': val_windows,
+        'test': test_windows,
+    }
     
-    return df, norm_stats, window_splits
+    print(f"Generated sliding windows:")
+    print(f"  Train: {len(train_windows)} windows")
+    if train_windows:
+        print(f"    First: units [{train_windows[0]['time_range'][0]}, {train_windows[0]['time_range'][1]}], "
+              f"learn={train_windows[0]['learn_count']}, pred={train_windows[0]['pred_count']}")
+        print(f"    Last: units [{train_windows[-1]['time_range'][0]}, {train_windows[-1]['time_range'][1]}], "
+              f"learn={train_windows[-1]['learn_count']}, pred={train_windows[-1]['pred_count']}")
+    print(f"  Val: {len(val_windows)} windows")
+    print(f"  Test: {len(test_windows)} windows")
+    
+    split_indices = {
+        'train_idx': train_indices,
+        'val_idx': val_indices,
+        'test_idx': test_indices,
+    }
+
+    return df, norm_stats, window_splits, split_indices

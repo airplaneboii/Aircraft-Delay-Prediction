@@ -219,7 +219,7 @@ def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses,
     if torch.cuda.is_available():
         try:
             gpu_mem_peak = torch.cuda.max_memory_allocated() / 1024**2
-            torch.cuda.reset_max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
         except Exception:
             gpu_mem_peak = None
 

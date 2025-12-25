@@ -12,7 +12,7 @@ verbosity: 1  # 0=WARNING, 1=INFO, 2=DEBUG
 # ========================================
 data_path: "data/datasets/2M_20251221_210514.csv"
 data_split: [80, 10, 10]  # train/val/test split percentages
-normalize: false  # enable normalization
+normalize: true  # enable normalization
 
 # ========================================
 # Sliding Window Parameters

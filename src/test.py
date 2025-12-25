@@ -1,12 +1,8 @@
 import time
-from datetime import datetime
 import torch
-import pandas as pd
-import os
-from src.utils import regression_metrics, classification_metrics, compute_epoch_stats, resolve_fanouts
-from torch_geometric.loader import NeighborLoader
 import logging
 from tqdm.auto import tqdm
+from src.utils import resolve_fanouts
 
 try:
     import psutil
@@ -14,36 +10,16 @@ except Exception:
     psutil = None
 
 
-def test(
-        model: torch.nn.Module,
-        graph,
-        args,
-        window_id: int = 0,
-        total_windows: int = 1,
-        ) -> None:
-    start_dt = datetime.now()
-    start_ts = time.time()
-    # use centralized logger
-    logger = logging.getLogger("train")
-    logger.info("Test start (window %d/%d): %s", window_id+1, total_windows, start_dt.isoformat())
-
-    device = next(model.parameters()).device
-    use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
+def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
+    """Evaluate on a single dataset split (no windows)."""
+    all_labels = []
+    all_preds = []
     
-    if args.mode == "val":
-        eval_mask = graph["flight"].val_mask
-    elif args.mode == "test":
-        eval_mask = graph["flight"].test_mask
-    else:
-        raise ValueError(f"Invalid mode for testing: {args.mode}")
-
     eval_nodes = eval_mask.nonzero(as_tuple=False).view(-1)
-
-    # Resolve neighbor fanouts similar to train
-    fanouts = resolve_fanouts(model, getattr(args, "neighbor_fanouts", None))
-
-    # Create loader if requested
+    
+    # Create loader if using neighbor sampling
     if use_neighbor_sampling:
+        from torch_geometric.loader import NeighborLoader
         input_nodes = ("flight", eval_nodes)
         
         loader = NeighborLoader(
@@ -56,14 +32,10 @@ def test(
     else:
         loader = None
 
-    model.eval()
-    all_labels = []
-    all_preds = []
-
     with torch.no_grad():
         if use_neighbor_sampling and loader is not None:
             total_batches = len(loader) if hasattr(loader, "__len__") else None
-            for batch_idx, batch in enumerate(tqdm(loader, total=total_batches, desc="Testing")):
+            for batch_idx, batch in enumerate(tqdm(loader, total=total_batches, desc=f"Evaluating {args.mode}")):
                 batch = batch.to(device)
                 out = model(batch.x_dict, batch.edge_index_dict)
                 flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
@@ -82,174 +54,130 @@ def test(
                     all_preds.append(preds.detach().cpu())
 
         else:
+            # Full-batch evaluation
             out = model(graph.x_dict, graph.edge_index_dict)
             
             if args.prediction_type == "regression":
-                # For hetero4: use target_mask if present (last snapshot prediction during training windows)
-                # For val/test chunks: just use eval_mask (no windowing)
-                if hasattr(graph["flight"], "target_mask"):
-                    # Training window evaluation (predict last snapshot)
-                    combined_mask = eval_mask & graph["flight"].target_mask
-                elif hasattr(graph["flight"], "window_mask"):
-                    # Legacy window mask
-                    combined_mask = eval_mask & graph["flight"].window_mask
-                else:
-                    # Standard evaluation (val/test chunks)
-                    combined_mask = eval_mask
-                
-                labels = graph["flight"].y.float().squeeze(-1)[combined_mask]
-                preds = out.squeeze(-1)[combined_mask]
+                labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
+                preds = out.squeeze(-1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                # Classification: similar logic
-                if hasattr(graph["flight"], "target_mask"):
-                    combined_mask = eval_mask & graph["flight"].target_mask
-                elif hasattr(graph["flight"], "window_mask"):
-                    combined_mask = eval_mask & graph["flight"].window_mask
-                else:
-                    combined_mask = eval_mask
-                labels = graph["flight"].y.float()[combined_mask]  # float for BCE
-                logits = out[combined_mask]  # shape [num_nodes]
-
-                # convert logits to 0/1 predictions
+                labels = graph["flight"].y.float()[eval_mask]
+                logits = out[eval_mask]
                 probs = torch.sigmoid(logits)
                 preds = (probs >= args.border).long()
-
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
 
+    # Concatenate and compute metrics using compute_epoch_stats
+    labels_cat = torch.cat(all_labels) if all_labels else torch.tensor([])
+    preds_cat = torch.cat(all_preds) if all_preds else torch.tensor([])
+    
+    from src.utils import compute_epoch_stats
+    compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
 
-        # Concatenate and compute metrics
-        if all_labels:
-            labels_cat = torch.cat(all_labels)
-            preds_cat = torch.cat(all_preds)
-        else:
-            labels_cat = torch.tensor([])
-            preds_cat = torch.tensor([])
 
-        # Prepare (and save) predictions and true values to CSV; un-normalize if stats available
-        if args.prediction_type == "regression":
-            try:
-                # attempt to recover node ids if available (from neighbor sampling batches)
-                node_ids = None
-                if use_neighbor_sampling and loader is not None:
-                    # rebuild node_ids from collected batches if they exposed 'n_id'
-                    # all_batches_node_ids was not stored; try to get from last batch variable if present
-                    # Fallback: use sequential ids
-                    node_ids = torch.arange(labels_cat.size(0)).cpu()
+def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
+    """Evaluate on sliding windows."""
+    # Store original ARR_DELAY if masking is needed (for hetero4)
+    if "ARR_DELAY" in [col for col in range(graph["flight"].x.size(1))]:
+        arr_delay_original = graph["flight"].x[:, -2].clone()
+    else:
+        arr_delay_original = None
+    
+    all_window_labels = []
+    all_window_preds = []
+    
+    for window_info in tqdm(window_defs, desc=f"Evaluating {args.mode} windows", unit="window"):
+        # Restore original ARR_DELAY
+        if arr_delay_original is not None:
+            graph["flight"].x[:, -2] = arr_delay_original
+        
+        # Mask ARR_DELAY for pred window (same as training)
+        pred_indices = window_info['pred_indices']
+        if arr_delay_original is not None:
+            graph["flight"].x[pred_indices, -2] = 0.0
+        
+        # Set masks for evaluation
+        learn_mask_tensor = torch.tensor(window_info['learn_mask'], dtype=torch.bool, device=graph["flight"].x.device)
+        pred_mask_tensor = torch.tensor(window_info['pred_mask'], dtype=torch.bool, device=graph["flight"].x.device)
+        
+        # Combine with eval mask (val or test split)
+        eval_learn_mask = eval_mask & learn_mask_tensor
+        eval_pred_mask = eval_mask & pred_mask_tensor
+        
+        with torch.no_grad():
+            if use_neighbor_sampling:
+                # For neighbor sampling with windows: more complex, skip for now
+                logger.warning("Neighbor sampling with sliding windows not fully implemented for evaluation")
+                continue
+            else:
+                # Full-batch evaluation
+                out = model(graph.x_dict, graph.edge_index_dict)
+                
+                if args.prediction_type == "regression":
+                    # Evaluate on prediction window only
+                    labels = graph["flight"].y.float().squeeze(-1)[eval_pred_mask]
+                    preds = out.squeeze(-1)[eval_pred_mask]
+                    all_window_labels.append(labels.detach().cpu())
+                    all_window_preds.append(preds.detach().cpu())
                 else:
-                    # full-batch: use natural order of graph flight nodes
-                    node_ids = torch.arange(labels_cat.size(0)).cpu()
+                    labels = graph["flight"].y.float()[eval_pred_mask]
+                    logits = out[eval_pred_mask]
+                    probs = torch.sigmoid(logits)
+                    preds = (probs >= args.border).long()
+                    all_window_labels.append(labels.detach().cpu())
+                    all_window_preds.append(preds.detach().cpu())
+    
+    # Restore original ARR_DELAY
+    if arr_delay_original is not None:
+        graph["flight"].x[:, -2] = arr_delay_original
+    
+    # Concatenate all windows and compute metrics
+    labels_cat = torch.cat(all_window_labels) if all_window_labels else torch.tensor([])
+    preds_cat = torch.cat(all_window_preds) if all_window_preds else torch.tensor([])
+    
+    from src.utils import compute_epoch_stats
+    compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
 
-                true_vals = labels_cat.cpu().numpy()
-                pred_vals = preds_cat.cpu().numpy()
 
-                # Try to un-normalize using args.norm_stats (prefer 'y' key then 'ARR_DELAY')
-                unnorm_true = None
-                unnorm_pred = None
-                try:
-                    norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None) or {}
-                    mu_map = norm_stats.get("mu", {})
-                    sigma_map = norm_stats.get("sigma", {})
-                    if "y" in mu_map and "y" in sigma_map:
-                        mu = float(mu_map["y"])
-                        sigma = float(sigma_map["y"])
-                    elif "ARR_DELAY" in mu_map and "ARR_DELAY" in sigma_map:
-                        mu = float(mu_map["ARR_DELAY"])
-                        sigma = float(sigma_map["ARR_DELAY"])
-                    else:
-                        mu = None
-                        sigma = None
+def test(
+        model: torch.nn.Module,
+        graph,
+        args,
+        window_defs: list = None,  # New: sliding window definitions for evaluation
+        ) -> None:
+    """
+    Evaluate the model on val/test data.
+    If window_defs is provided, evaluate on sliding windows.
+    Otherwise, evaluate on full split.
+    """
+    import time
+    start_ts = time.time()
+    logger = logging.getLogger("train")
+    
+    device = next(model.parameters()).device
+    use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
+    
+    if args.mode == "val":
+        eval_mask = graph["flight"].val_mask
+    elif args.mode == "test":
+        eval_mask = graph["flight"].test_mask
+    else:
+        raise ValueError(f"Invalid mode for testing: {args.mode}")
 
-                    if mu is not None and sigma is not None:
-                        unnorm_true = (true_vals * sigma) + mu
-                        unnorm_pred = (pred_vals * sigma) + mu
-                except Exception:
-                    unnorm_true = None
-                    unnorm_pred = None
-
-                df = pd.DataFrame({
-                    "node_id": node_ids.numpy(),
-                    "true": true_vals,
-                    "pred": pred_vals,
-                })
-                if unnorm_true is not None:
-                    df["true_raw"] = unnorm_true
-                    df["pred_raw"] = unnorm_pred
-
-                model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
-                out_dir = getattr(args, "log_dir", None) or getattr(args, "model_dir", ".")
-                os.makedirs(out_dir, exist_ok=True)
-                out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
-                df.to_csv(out_path, index=False)
-                logger.info("Saved predictions to %s", out_path)
-            except Exception:
-                logger.exception("Failed to save predictions CSV")
-        elif args.prediction_type == "classification":
-            try:
-                # attempt to recover node ids if available (from neighbor sampling batches)
-                node_ids = None
-                if use_neighbor_sampling and loader is not None:
-                    # rebuild node_ids from collected batches if they exposed 'n_id'
-                    # all_batches_node_ids was not stored; try to get from last batch variable if present
-                    # Fallback: use sequential ids
-                    node_ids = torch.arange(labels_cat.size(0)).cpu()
-                else:
-                    # full-batch: use natural order of graph flight nodes
-                    node_ids = torch.arange(labels_cat.size(0)).cpu()
-
-                true_vals = labels_cat.view(-1).cpu().numpy()
-                pred_vals = preds_cat.view(-1).cpu().numpy()
-
-                df = pd.DataFrame({
-                    "node_id": node_ids.numpy(),
-                    "true": true_vals,
-                    "pred": pred_vals,
-                })
-
-                model_file_base = getattr(args, "model_file", None) or getattr(args, "model_type", "model")
-                out_dir = getattr(args, "log_dir", None) or getattr(args, "model_dir", ".")
-                os.makedirs(out_dir, exist_ok=True)
-                out_path = os.path.join(out_dir, f"{model_file_base}_preds.csv")
-                df.to_csv(out_path, index=False)
-                logger.info("Saved predictions to %s", out_path)
-            except Exception:
-                logger.exception("Failed to save predictions CSV")
-        else:
-            raise ValueError(f"Unknown prediction type: {args.prediction_type}")
-
-        if args.prediction_type == "regression":
-            # If normalization stats exist for the target, unnormalize before computing metrics for interpretability
-            try:
-                norm_stats = getattr(graph, "norm_stats", None) or getattr(args, "norm_stats", None) or {}
-                mu_map = norm_stats.get("mu", {})
-                sigma_map = norm_stats.get("sigma", {})
-                if "y" in mu_map and "y" in sigma_map:
-                    mu = float(mu_map["y"])
-                    sigma = float(sigma_map["y"])
-                elif "ARR_DELAY" in mu_map and "ARR_DELAY" in sigma_map:
-                    mu = float(mu_map["ARR_DELAY"])
-                    sigma = float(sigma_map["ARR_DELAY"])
-                else:
-                    mu = None
-                    sigma = None
-            except Exception:
-                mu = None
-                sigma = None
-
-            #if mu is not None and sigma is not None:
-                # unnormalize and convert back to torch tensors for metrics
-                #labels_unnorm = torch.from_numpy((labels_cat.cpu().numpy() * sigma + mu)).to(labels_cat.device)
-                #preds_unnorm = torch.from_numpy((preds_cat.cpu().numpy() * sigma + mu)).to(preds_cat.device)
-            #    metrics_results = regression_metrics(labels_unnorm, preds_unnorm, args.norm_stats)
-            #else:
-        # Use the shared logging helper to print metrics and resource usage
-        # Pass epoch=0 and a dummy epoch_losses list for compatibility
-        compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
-
-    end_ts = time.time()
-    end_dt = datetime.now()
-    logger.info("Test end (window %d/%d): %s", window_id+1, total_windows, end_dt.isoformat())
-    logger.info("Elapsed: %.2f s", end_ts - start_ts)
+    # Resolve neighbor fanouts similar to train
+    fanouts = resolve_fanouts(model, getattr(args, "neighbor_fanouts", None))
+    
+    model.eval()
+    
+    if window_defs is None:
+        # No sliding windows: evaluate on full split (legacy behavior)
+        logger.info(f"Evaluating {args.mode} on full split (no windows)")
+        _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts)
+    else:
+        # Sliding window evaluation
+        logger.info(f"Evaluating {args.mode} on {len(window_defs)} sliding windows")
+        _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts)
 

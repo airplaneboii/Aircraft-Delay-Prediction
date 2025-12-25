@@ -72,7 +72,11 @@ def main():
         description="Step 8: Installing utility libraries (pandas, tqdm, colorama, requests, bs4, scikit-learn, pyyaml)")
 
     print("\nEnvironment setup complete!")
-    print(f"Activate your venv with:\n  source {VENV_DIR}/bin/activate   (Linux/macOS)\n  {VENV_DIR}\\Scripts\\activate.bat    (Windows)")
+    print(f"Activate your venv with:\n"
+          f"\tsource {VENV_DIR}/bin/activate   (Linux/macOS)\n"
+          f"\t{VENV_DIR}\\Scripts\\activate.bat    (Windows Command Prompt)\n"
+          f"\t{VENV_DIR}\\Scripts\\Acticate.ps1    (Windows Powershell)\n"
+        )
 
 if __name__ == "__main__":
     main()
