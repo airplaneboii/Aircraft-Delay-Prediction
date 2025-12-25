@@ -34,6 +34,10 @@ def load_data(
     if "CANCELLED" in df.columns:
         df = df[df["CANCELLED"] == 0].reset_index(drop=True)
 
+    # Ensure arrival delays are non-negative: set negative ARR_DELAY to 0
+    if "ARR_DELAY" in df.columns:
+        df["ARR_DELAY"] = pd.to_numeric(df["ARR_DELAY"], errors="coerce")
+        df["ARR_DELAY"] = df["ARR_DELAY"].clip(lower=0).fillna(0)
     # Create target column based on task type
     if task_type == "regression":
         if "ARR_DELAY" in df.columns:
