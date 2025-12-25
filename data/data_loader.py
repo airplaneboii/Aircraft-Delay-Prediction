@@ -1,28 +1,36 @@
 import os
+import warnings
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import TimeSeriesSplit
 from .splitter import split_file_to_list
+from src.utils import hhmm_to_minutes
+
+# Suppress pandas FutureWarning about dtype assignment during normalization
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*Setting an item of incompatible dtype.*')
+
 
 def load_data(
     path: str,
     mode: str = "train",
     task_type: str = "regression",
     max_rows: int | None = None,
-    split_dim: tuple[int, int, int] = (80, 10, 10),
+    split_ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
     normalize_cols_file: str | None = None,
-    ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, dict]:
-    """Load the merged CSV into a DataFrame.
-
-    Note: Data cleaning (dropping rows with missing essential fields and filling non-essential numeric NaNs) 
-    should be performed during merging to save time when running multiple tests.
-    This loader only reads the CSV and applies a development row cap.
-    Eventually some data processing and conversion that can't be stored in a CSV can be done here.
-
+    unit: int = 60,  # Time unit in minutes (default 1 hour)
+    learn_window: int = 10,  # Length of learning window in units
+    pred_window: int = 1,  # Length of prediction window in units
+    window_stride: int = 1,  # Stride between windows in units
+    normalize: bool = True,
+) -> tuple[pd.DataFrame, dict, list]:
+    """Load data and prepare for sliding window temporal training.
+    
     Returns:
-        (df, train_index, val_index, test_index, norm_stats)
+        df: Full dataframe sorted by time
+        norm_stats: Normalization statistics
+        window_splits: List of (learn_indices, pred_indices) tuples for each training window
     """
-
-    # Read CSV
+    
     df = pd.read_csv(path)
 
     # Optional row cap for quicker testing
@@ -38,70 +46,125 @@ def load_data(
     if "ARR_DELAY" in df.columns:
         df["ARR_DELAY"] = pd.to_numeric(df["ARR_DELAY"], errors="coerce")
         df["ARR_DELAY"] = df["ARR_DELAY"].clip(lower=0).fillna(0)
-    # Create target column based on task type
+
     if task_type == "regression":
-        if "ARR_DELAY" in df.columns:
-            df["y"] = df["ARR_DELAY"]
-        else:
-            df["y"] = 0
+        df["y"] = df["ARR_DELAY"] if "ARR_DELAY" in df.columns else 0
     else:
-        if "ARR_DEL15" in df.columns:
-            df["y"] = df["ARR_DEL15"]
-        else:
-            df["y"] = 0
+        df["y"] = df["ARR_DEL15"] if "ARR_DEL15" in df.columns else 0
 
-    # Split data
-    num_data = len(df)
-    i_train = int(num_data * split_dim[0] / 100)
-    i_val = int(num_data * (split_dim[0] + split_dim[1]) / 100)
-
-    train_index = np.arange(0, i_train)
-    val_index = np.arange(i_train, i_val)
-    test_index = np.arange(i_val, num_data)
-
-    # --- Normalization: compute mu/sigma on TRAIN split only, then apply to all splits ---
-    # Avoids data leakage by fitting statistics on train and reusing for val/test.
-    # - If a normalize_cols_file is provided and exists, use the listed columns (one per line).
-    # - If the file is missing or empty, do NOT normalize anything (user opted out).
-    num_cols = []
-    if normalize_cols_file and os.path.isfile(normalize_cols_file):
+    # Build timestamps
+    if "FL_DATE" not in df.columns or not pd.api.types.is_datetime64_any_dtype(df["FL_DATE"]):
+        df["FL_DATE"] = pd.to_datetime(
+            df[["YEAR", "MONTH", "DAY_OF_MONTH"]].rename(columns={"YEAR": "year", "MONTH": "month", "DAY_OF_MONTH": "day"})
+        )
+    
+    df["dep_minutes"] = df["CRS_DEP_TIME"].apply(hhmm_to_minutes)
+    df["dep_timestamp"] = df["FL_DATE"] + pd.to_timedelta(df["dep_minutes"], unit="m")
+    
+    # Sort by departure timestamp
+    df = df.sort_values("dep_timestamp").reset_index(drop=True)
+    
+    # Create time bins based on unit size
+    min_time = df["dep_timestamp"].min()
+    df["time_unit"] = ((df["dep_timestamp"] - min_time).dt.total_seconds() / (unit * 60)).astype(int)
+    
+    print(f"Time unit: {unit} minutes")
+    print(f"Total time units: {df['time_unit'].max() + 1}")
+    print(f"Dataset spans: {df['dep_timestamp'].min()} to {df['dep_timestamp'].max()}")
+    
+    # Split chronologically into train/val/test
+    n = len(df)
+    train_end = int(n * split_ratios[0])
+    val_end = int(n * (split_ratios[0] + split_ratios[1]))
+    
+    train_indices = np.arange(0, train_end)
+    val_indices = np.arange(train_end, val_end)
+    test_indices = np.arange(val_end, n)
+    
+    print(f"\nChronological split: train={len(train_indices)} ({split_ratios[0]*100:.0f}%), "
+          f"val={len(val_indices)} ({split_ratios[1]*100:.0f}%), "
+          f"test={len(test_indices)} ({split_ratios[2]*100:.0f}%)")
+    
+    # Normalize using train statistics
+    norm_stats = {"mu": {}, "sigma": {}}
+    if normalize and normalize_cols_file and os.path.isfile(normalize_cols_file):
         try:
             requested = split_file_to_list(normalize_cols_file)
-            # Keep only columns that exist in df
             num_cols = [c for c in requested if c in df.columns]
-        except Exception:
-            num_cols = []
-
-    norm_stats = {"mu": {}, "sigma": {}}
-    if num_cols:
-        # Fit statistics on training subset only
-        train_slice = df.loc[train_index, num_cols]
-        mu = train_slice.mean()
-        sigma = train_slice.std(ddof=0)
-        sigma_safe = sigma.replace({0: 1.0})  # guard against zero variance
-
-        # Apply train-derived stats to all rows (train/val/test)
-        df[num_cols] = (df[num_cols] - mu) / sigma_safe
-
-        # Store stats as plain floats for JSON-compatibility
-        norm_stats["mu"] = {c: float(mu[c]) for c in num_cols}
-        norm_stats["sigma"] = {c: float(sigma_safe[c]) for c in num_cols}
-
-        print(f"Normalized columns (fit on train): {', '.join(num_cols)}")
-    else:
-        norm_stats = {"mu": {}, "sigma": {}}
-        print("No normalization applied (no valid columns listed in normalize.txt)")
-
-
-
-#    # for now
-#    dates = df["FL_DATE"].unique().sort_values()
-#    dates_train = dates[:int(len(dates) * split_dim[0] / 100)]
-#    dates_val = dates[int(len(dates) * split_dim[0] / 100):int(len(dates) * (split_dim[0] + split_dim[1]) / 100)]
-#    dates_test = dates[int(len(dates) * (split_dim[0] + split_dim[1]) / 100):]
-#
-#    set_train = df["FL_DATE"].isin(dates_train)
-#    set_val = df["FL_DATE"].isin(dates_val)
-#    set_test = df["FL_DATE"].isin(dates_test)
-
-    return df, train_index, val_index, test_index, norm_stats
+            
+            if num_cols:
+                print(f"Normalizing {len(num_cols)} columns using train split statistics")
+                df[num_cols] = df[num_cols].astype('float32')
+                
+                # Compute stats from train portion only
+                train_slice = df.loc[train_indices, num_cols]
+                mu = train_slice.mean()
+                sigma = train_slice.std(ddof=0)
+                sigma_safe = sigma.replace({0: 1.0})
+                
+                # Apply to entire dataframe
+                df.loc[:, num_cols] = (df[num_cols] - mu) / sigma_safe
+                
+                norm_stats["mu"] = {c: float(mu[c]) for c in num_cols}
+                norm_stats["sigma"] = {c: float(sigma_safe[c]) for c in num_cols}
+                print(f"Normalization complete. Example: ARR_DELAY μ={norm_stats['mu'].get('ARR_DELAY', 'N/A'):.2f}, "
+                      f"σ={norm_stats['sigma'].get('ARR_DELAY', 'N/A'):.2f}")
+        except Exception as e:
+            print(f"Warning: normalization failed: {e}")
+    
+    # Store split masks on dataframe
+    df["split"] = "test"  # default
+    df.loc[train_indices, "split"] = "train"
+    df.loc[val_indices, "split"] = "val"
+    
+    # Create sliding windows for training using time units
+    train_df = df.iloc[train_indices].copy()
+    train_time_units = train_df["time_unit"].values
+    
+    min_unit = train_time_units.min()
+    max_unit = train_time_units.max()
+    total_window_size = learn_window + pred_window
+    
+    print(f"\nSliding window configuration:")
+    print(f"  Learn window: {learn_window} units ({learn_window * unit} minutes)")
+    print(f"  Pred window: {pred_window} units ({pred_window * unit} minutes)")
+    print(f"  Total window: {total_window_size} units ({total_window_size * unit} minutes)")
+    print(f"  Stride: {window_stride} units ({window_stride * unit} minutes)")
+    
+    # Generate sliding windows
+    window_splits = []
+    num_possible_windows = max(1, (max_unit - min_unit + 1 - total_window_size) // window_stride + 1)
+    
+    for i in range(num_possible_windows):
+        window_start = min_unit + i * window_stride
+        learn_end = window_start + learn_window
+        pred_end = learn_end + pred_window
+        
+        if pred_end > max_unit + 1:
+            break
+        
+        # Get indices for learn and pred windows
+        learn_mask = (train_time_units >= window_start) & (train_time_units < learn_end)
+        pred_mask = (train_time_units >= learn_end) & (train_time_units < pred_end)
+        
+        learn_idx = train_indices[learn_mask]
+        pred_idx = train_indices[pred_mask]
+        
+        if len(learn_idx) > 0 and len(pred_idx) > 0:
+            window_splits.append({
+                'window_id': len(window_splits),
+                'learn_indices': learn_idx,
+                'pred_indices': pred_idx,
+                'time_range': (window_start, pred_end - 1),
+                'learn_count': len(learn_idx),
+                'pred_count': len(pred_idx),
+            })
+    
+    print(f"Generated {len(window_splits)} training windows")
+    if window_splits:
+        print(f"  First window: units [{window_splits[0]['time_range'][0]}, {window_splits[0]['time_range'][1]}], "
+              f"learn={window_splits[0]['learn_count']}, pred={window_splits[0]['pred_count']}")
+        print(f"  Last window: units [{window_splits[-1]['time_range'][0]}, {window_splits[-1]['time_range'][1]}], "
+              f"learn={window_splits[-1]['learn_count']}, pred={window_splits[-1]['pred_count']}")
+    
+    return df, norm_stats, window_splits

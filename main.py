@@ -1,8 +1,10 @@
 from src.config import get_args
+import numpy as np
 from src.graph.base import BaseGraph
 from src.graph.hetero1 import HeteroGraph1
 from src.graph.hetero2 import HeteroGraph2
 from src.graph.hetero3 import HeteroGraph3
+from src.graph.hetero4 import HeteroGraph4
 from src.graph.not_very_hetero import NotVeryHetero
 from src.graph.homo import HomoGraph
 from src.graph.hetero2nodes import Hetero2Nodes
@@ -19,95 +21,107 @@ import os
 
 def main():
     args = get_args()    
-    # Configure logging as early as possible
     verbosity = getattr(args, "verbosity", 0)
     logger = setup_logging(verbosity)
     logger.info("Starting run with args: %s", vars(args))
     ensure_dir(args.graph_dir)
     ensure_dir(args.model_dir)
     
-    # lazy import torch for a quicker help command
-    import torch
-    # Load or build graph
+    import torch  # lazy import for quicker help
+
     graph = None
     graph_loaded = False
+    data_windows = None
+    first_graph = None
+
     if args.load_graph:
-        # Handle graph paths with or without .pt extension
         graph_filename = args.load_graph if args.load_graph.endswith(".pt") else f"{args.load_graph}.pt"
         graph_path = os.path.join(args.graph_dir, graph_filename)
         if os.path.exists(graph_path):
             print(f"Loading graph from {graph_path}...")
-            # weights_only=False required for PyG HeteroData objects
             graph = torch.load(graph_path, weights_only=False)
             graph_loaded = True
+            try:
+                if getattr(graph, "norm_stats", None):
+                    setattr(args, "norm_stats", graph.norm_stats)
+            except Exception:
+                pass
             print_graph_stats(graph)
         else:
-            print(f"Graph file not found at {graph_path}. Building from scratch...")
+            print(f"Graph file not found at {graph_path}. Building from sliding windows...")
+
+    df = None
+    norm_stats = None
+    window_splits = None
     
-    # Build graph if not loaded
     if graph is None:
-        print("Loading data...")
-        df, train_index, val_index, test_index, norm_stats = load_data(
+        print(f"Loading data...")
+        df, norm_stats, window_splits = load_data(
             args.data_path,
             mode=args.mode,
             task_type=args.prediction_type,
             max_rows=getattr(args, "rows", None),
-            normalize_cols_file="data/normalize.txt",
+            split_ratios=tuple(x/100 for x in args.data_split),
+            normalize_cols_file=("data/normalize.txt" if getattr(args, "normalize", True) else None),
+            unit=getattr(args, "unit", 60),
+            learn_window=getattr(args, "learn_window", 10),
+            pred_window=getattr(args, "pred_window", 1),
+            window_stride=getattr(args, "window_stride", 1),
+            normalize=getattr(args, "normalize", True),
         )
-        # attach normalization stats to args for downstream use/printing
         setattr(args, "norm_stats", norm_stats)
-        print("Building graph...")
+
+    def build_graph_from_df(dataframe, train_idx, val_idx, test_idx, norm_stats):
+
         if args.graph_type == "base":
-            graph = BaseGraph(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = BaseGraph(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         elif args.graph_type == "hetero1":
-            graph = HeteroGraph1(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = HeteroGraph1(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         elif args.graph_type == "hetero2":
-            graph = HeteroGraph2(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = HeteroGraph2(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         elif args.graph_type == "hetero3":
-            graph = HeteroGraph3(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = HeteroGraph3(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
+        elif args.graph_type == "hetero4":
+            graph = HeteroGraph4(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         elif args.graph_type == "not_very_hetero":
-            graph = NotVeryHetero(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = NotVeryHetero(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         elif args.graph_type == "homo":
-            graph = HomoGraph(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = HomoGraph(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         elif args.graph_type == "hetero2nodes":
-            graph = Hetero2Nodes(df, args, train_index, val_index, test_index, norm_stats).build()
-            print_graph_stats(graph)
+            graph = Hetero2Nodes(dataframe, args, train_idx, val_idx, test_idx, norm_stats).build()
         else:
             raise ValueError(f"Unsupported graph type: {args.graph_type}")
-    
-    # Save graph if requested (do not overwrite if we loaded an existing graph)
-    if args.save_graph and not graph_loaded:
-        # Handle graph paths with or without .pt extension
+        return graph
+
+    if graph is None and df is not None:
+        # Get split indices
+        train_idx = np.where(df["split"] == "train")[0]
+        val_idx = np.where(df["split"] == "val")[0]
+        test_idx = np.where(df["split"] == "test")[0]
+        
+        first_graph = build_graph_from_df(df, train_idx, val_idx, test_idx, norm_stats)
+        print_graph_stats(first_graph)
+        in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}
+    else:
+        first_graph = graph
+        in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}
+
+    if args.save_graph and not graph_loaded and first_graph is not None:
         graph_filename = args.save_graph if args.save_graph.endswith(".pt") else f"{args.save_graph}.pt"
         graph_path = os.path.join(args.graph_dir, graph_filename)
         print(f"Saving graph to {graph_path}...")
-        torch.save(graph, graph_path)
+        torch.save(first_graph, graph_path)
         print("Graph saved successfully.")
     
-    # Move to GPU if available
     print("checking for GPUs...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    # Display available memory before graph building
     print_available_memory()
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
-    if use_neighbor_sampling and args.mode == "train":
-        print("Neighbor sampling enabled: keeping full graph on CPU; mini-batches will be moved per step.")
-    else:
-        graph = move_graph_to_device(graph, device)
-        print("Graph moved to device.")
-        
-    metadata = graph.metadata() #metadata[0] are node types, metadata[1] are edge types
-    in_channels_dict = { nodeType: graph[nodeType].x.size(1) for nodeType in metadata[0]}
+
+    metadata = first_graph.metadata()  # metadata[0] are node types, metadata[1] are edge types
     print(f"Node feature sizes: {in_channels_dict}")
 
-    # Select model
     if args.model_type == "none":
         print("Not using any model, this is just for testing the surrounding code and graph building")
         return
@@ -169,15 +183,64 @@ def main():
     else:
         raise ValueError("Unsupported model type.")
 
-    # Determine model file path (allow user-provided filename without extension)
     model_basename = getattr(args, "model_file", None) or args.model_type
     model_filename = model_basename if model_basename.endswith(".pt") else f"{model_basename}.pt"
     model_path = os.path.join(args.model_dir, model_filename)
 
     if args.mode == "train":
-        train(model, graph, args)
-        print(f"Saving model to {model_path}...")
-        # Save model state plus normalization stats (if present) for reproducible inference
+        if window_splits is None or len(window_splits) == 0:
+            # No sliding windows, just train on full graph
+            working_graph = first_graph
+            if not use_neighbor_sampling:
+                working_graph = move_graph_to_device(working_graph, device)
+            train(model, working_graph, args, window_defs=None)
+        else:
+            # Sliding window training with learn/pred splits
+            working_graph = first_graph
+            if not use_neighbor_sampling:
+                working_graph = move_graph_to_device(working_graph, device)
+                print("Graph moved to device for sliding window training")
+            
+            print(f"\nPreparing {len(window_splits)} windows for training")
+            
+            # Prepare window definitions with ARR_DELAY masking for pred windows
+            window_defs = []
+            for w in window_splits:
+                # Create masks as boolean arrays
+                learn_mask = np.zeros(len(df), dtype=bool)
+                pred_mask = np.zeros(len(df), dtype=bool)
+                learn_mask[w['learn_indices']] = True
+                pred_mask[w['pred_indices']] = True
+                
+                window_defs.append({
+                    'window_id': w['window_id'],
+                    'learn_mask': learn_mask,
+                    'pred_mask': pred_mask,
+                    'learn_indices': w['learn_indices'],
+                    'pred_indices': w['pred_indices'],
+                    'learn_count': w['learn_count'],
+                    'pred_count': w['pred_count'],
+                })
+            
+            # Train with sliding windows
+            train(model, working_graph, args, window_defs=window_defs)
+            
+            # After training, evaluate on val/test
+            if working_graph["flight"].val_mask.sum() > 0:
+                print("\n=== Validation on held-out validation data ===")
+                prev_mode = args.mode
+                args.mode = "val"
+                test(model, working_graph, args, window_id=0, total_windows=1)
+                args.mode = prev_mode
+            
+            if working_graph["flight"].test_mask.sum() > 0:
+                print("\n=== Testing on held-out test data ===")
+                prev_mode = args.mode
+                args.mode = "test"
+                test(model, working_graph, args, window_id=0, total_windows=1)
+                args.mode = prev_mode
+
+        print(f"Saving final model to {model_path}...")
         save_obj = {"model_state_dict": model.state_dict()}
         try:
             norm_stats = getattr(args, "norm_stats", None)
@@ -186,14 +249,23 @@ def main():
         except Exception:
             pass
         torch.save(save_obj, model_path)
-    elif args.mode == "test" or args.mode == "val":
+    elif args.mode in ("test", "val"):
+        # For test/val mode, use the full graph we already built
+        if first_graph is not None:
+            graph = first_graph
+            if not use_neighbor_sampling:
+                graph = move_graph_to_device(graph, device)
+        elif graph_loaded and graph is not None:
+            if not use_neighbor_sampling:
+                graph = move_graph_to_device(graph, device)
+        else:
+            raise RuntimeError("No graph available for evaluation")
+
         if os.path.exists(model_path):
             print(f"Loading model from {model_path}...")
             loaded = torch.load(model_path)
-            # Backwards compatible: file may contain only a state_dict
             if isinstance(loaded, dict) and "model_state_dict" in loaded:
                 model.load_state_dict(loaded["model_state_dict"])
-                # restore normalization stats if saved with the model
                 if "norm_stats" in loaded:
                     try:
                         setattr(args, "norm_stats", loaded["norm_stats"])
@@ -204,7 +276,8 @@ def main():
                 model.load_state_dict(loaded)
         else:
             raise FileNotFoundError(f"Model file not found: {model_path}")
-        test(model, graph, args)
+
+        test(model, graph, args, window_id=0, total_windows=1)
 
 if __name__ == "__main__":
     main()

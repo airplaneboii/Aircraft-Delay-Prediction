@@ -17,13 +17,15 @@ except Exception:
 def test(
         model: torch.nn.Module,
         graph,
-        args
+        args,
+        window_id: int = 0,
+        total_windows: int = 1,
         ) -> None:
     start_dt = datetime.now()
     start_ts = time.time()
     # use centralized logger
     logger = logging.getLogger("train")
-    logger.info("Test start: %s", start_dt.isoformat())
+    logger.info("Test start (window %d/%d): %s", window_id+1, total_windows, start_dt.isoformat())
 
     device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
@@ -83,13 +85,32 @@ def test(
             out = model(graph.x_dict, graph.edge_index_dict)
             
             if args.prediction_type == "regression":
-                labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
-                preds = out.squeeze(-1)[eval_mask]
+                # For hetero4: use target_mask if present (last snapshot prediction during training windows)
+                # For val/test chunks: just use eval_mask (no windowing)
+                if hasattr(graph["flight"], "target_mask"):
+                    # Training window evaluation (predict last snapshot)
+                    combined_mask = eval_mask & graph["flight"].target_mask
+                elif hasattr(graph["flight"], "window_mask"):
+                    # Legacy window mask
+                    combined_mask = eval_mask & graph["flight"].window_mask
+                else:
+                    # Standard evaluation (val/test chunks)
+                    combined_mask = eval_mask
+                
+                labels = graph["flight"].y.float().squeeze(-1)[combined_mask]
+                preds = out.squeeze(-1)[combined_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = graph["flight"].y.float()[eval_mask]  # float for BCE
-                logits = out[eval_mask]  # shape [num_nodes]
+                # Classification: similar logic
+                if hasattr(graph["flight"], "target_mask"):
+                    combined_mask = eval_mask & graph["flight"].target_mask
+                elif hasattr(graph["flight"], "window_mask"):
+                    combined_mask = eval_mask & graph["flight"].window_mask
+                else:
+                    combined_mask = eval_mask
+                labels = graph["flight"].y.float()[combined_mask]  # float for BCE
+                logits = out[combined_mask]  # shape [num_nodes]
 
                 # convert logits to 0/1 predictions
                 probs = torch.sigmoid(logits)
@@ -229,6 +250,6 @@ def test(
 
     end_ts = time.time()
     end_dt = datetime.now()
-    logger.info("Test end: %s", end_dt.isoformat())
+    logger.info("Test end (window %d/%d): %s", window_id+1, total_windows, end_dt.isoformat())
     logger.info("Elapsed: %.2f s", end_ts - start_ts)
 

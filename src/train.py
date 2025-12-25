@@ -21,9 +21,13 @@ OVERSAMPLE_FACTOR = 1.0
 def train(
         model: nn.Module,
         graph,
-        args
+        args,
+        window_defs: list = None,  # New: list of window definitions for hetero4
     ) -> None:
     print(args)
+    # Use args.epochs for number of epochs
+    num_epochs = args.epochs
+    
     # Set model to training mode
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -128,10 +132,112 @@ def train(
         except Exception as e:
             logger.warning(f"torch.compile failed (backend={backend}, mode={mode}): {e}")
 
-    # Training loop
-    for epoch in range(start_epoch, args.epochs):
+    # Hetero4 sliding window training: epochs outer loop, windows inner loop with progress bar
+    if window_defs is not None:
+        print(f"\n=== Training with sliding windows: {len(window_defs)} windows per epoch ===")
+        
+        # Store original ARR_DELAY values to restore after each window
+        arr_delay_original = graph["flight"].x[:, -2].clone()  # ARR_DELAY feature column
+        
+        for epoch in range(start_epoch, num_epochs):
+            model.train()
+            epoch_start_time = time.time()
+            epoch_losses = []
+            all_labels = []
+            all_preds = []
+            
+            # Progress bar over windows within this epoch
+            for window_info in tqdm(window_defs, desc=f"Epoch {epoch+1}/{num_epochs}", unit="window"):
+                # Restore original ARR_DELAY
+                graph["flight"].x[:, -2] = arr_delay_original
+                
+                # Mask ARR_DELAY for pred window (prevent data leakage)
+                pred_indices = window_info['pred_indices']
+                graph["flight"].x[pred_indices, -2] = 0.0  # Zero out ARR_DELAY for prediction window
+                
+                # Set masks for training
+                learn_mask_tensor = torch.tensor(window_info['learn_mask'], dtype=torch.bool, device=graph["flight"].x.device)
+                pred_mask_tensor = torch.tensor(window_info['pred_mask'], dtype=torch.bool, device=graph["flight"].x.device)
+                
+                # Combine with train mask (only use train split data)
+                train_learn_mask = graph["flight"].train_mask & learn_mask_tensor
+                train_pred_mask = graph["flight"].train_mask & pred_mask_tensor
+                
+                optimizer.zero_grad()
+                
+                # Forward pass
+                with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
+                    out = model(graph.x_dict, graph.edge_index_dict)
+                
+                # Compute loss on prediction window only
+                if args.prediction_type == "regression":
+                    labels = graph["flight"].y.squeeze(-1)[train_pred_mask].to(device)
+                    preds = out.squeeze(-1)[train_pred_mask]
+                    loss = criterion(preds, labels)
+                    
+                    # Backward pass
+                    if amp_enabled:
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        loss.backward()
+                        optimizer.step()
+                    
+                    epoch_losses.append(loss.item())
+                    all_labels.append(labels.detach().cpu())
+                    all_preds.append(preds.detach().cpu())
+                else:
+                    labels = graph["flight"].y.view(-1).float()[train_pred_mask].to(device)
+                    logits = out[train_pred_mask].squeeze(-1)
+                    loss = criterion(logits, labels)
+                    
+                    probs = torch.sigmoid(logits)
+                    preds_for_metrics = (probs > args.border).long().cpu()
+                    
+                    # Backward pass
+                    if amp_enabled:
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        loss.backward()
+                        optimizer.step()
+                    
+                    epoch_losses.append(loss.item())
+                    all_labels.append(labels.detach().cpu())
+                    all_preds.append(preds_for_metrics)
+            
+            # Restore original ARR_DELAY after epoch
+            graph["flight"].x[:, -2] = arr_delay_original
+            
+            # Compute epoch stats (after all windows)
+            labels_cat = torch.cat(all_labels, dim=0)
+            preds_cat = torch.cat(all_preds, dim=0)
+            
+            from src.utils import compute_epoch_stats
+            stats = compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start_time, logger)
+            
+            # Write to CSV
+            if csv_writer:
+                csv_writer.writerow({k: stats.get(k, "") for k in csv_headers})
+                csv_file.flush()
+            
+            if scheduler:
+                scheduler.step()
+        
+        if csv_file:
+            csv_file.close()
+        
+        print(f"\nTraining completed in {time.time() - overall_start:.2f}s")
+        return
+    
+    # Legacy training (non-hetero4): single window or neighbor sampling
+    for epoch in range(start_epoch, num_epochs):
         model.train()
-        epoch_start = time.time()
+        epoch_start_time = time.time()
         epoch_losses = []
         all_labels = []
         all_preds = []
@@ -219,8 +325,19 @@ def train(
 
         if not use_neighbor_sampling:
             if args.prediction_type == "regression":
-                # do prediction only on training nodes
-                mask = graph["flight"].train_mask
+                # For hetero4 temporal windowing: use target_mask (last snapshot only) for loss
+                # Otherwise use train_mask combined with window_mask (all snapshots in window)
+                base_mask = graph["flight"].train_mask
+                
+                if hasattr(graph["flight"], "target_mask"):
+                    # Hetero4: predict only LAST snapshot in window
+                    mask = base_mask & graph["flight"].target_mask
+                elif hasattr(graph["flight"], "window_mask"):
+                    # Legacy: all snapshots in window
+                    mask = base_mask & graph["flight"].window_mask
+                else:
+                    mask = base_mask
+                
                 labels = graph["flight"].y.squeeze(-1)[mask].to(device)
                 preds = out.squeeze(-1)[mask]
                 loss = criterion(preds, labels)
@@ -276,7 +393,7 @@ def train(
         preds_cat = torch.cat(all_preds) if all_preds else torch.tensor([])
 
         # Compute metrics and log via shared helper
-        epoch_stats = compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start, logger)
+        epoch_stats = compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start_time, logger)
 
         # Write epoch stats to CSV using the returned dictionary
         if csv_writer is not None and epoch_stats is not None:

@@ -1,29 +1,51 @@
 # Default configuration values mirroring src/config.py
-config: null
+
+# General
 mode: train
+verbosity: 1
 rows: null
+
+# Data
+data_path: data/datasets/
+data_split: [80, 10, 10]
+normalize: true
+
+# Sliding Window
+unit: 60
+learn_window: 10
+pred_window: 1
+window_stride: 1
+
+# Graph
 graph_type: hetero3
 save_graph: null
 load_graph: null
-time_window: 6
+
+# Model
 model_type: rgcn
-data_path: data/datasets/
-graph_dir: pretrained/graphs/
-model_dir: pretrained/models/
-log_dir: logs/
+prediction_type: regression
 model_file: null
+border: 0.45
+
+# Training
+epochs: 500
+lr: 0.001
+weight_decay: 0.000001
+batch_size: 150000
 criterion: huber
+
+# Neighbor Sampling
+neighbor_sampling: false
+neighbor_fanouts: "15,10"
+
+# Performance
 amp: false
 compile: false
 compile_backend: inductor
 compile_mode: default
 resume: false
-epochs: 100
-lr: 0.0001
-weight_decay: 0.000001
-prediction_type: classification
-batch_size: 800000
-neighbor_sampling: false
-neighbor_fanouts: "15,10"
-border: 0.6
-verbosity: 1
+
+# Directories
+graph_dir: pretrained/graphs/
+model_dir: pretrained/models/
+log_dir: logs/

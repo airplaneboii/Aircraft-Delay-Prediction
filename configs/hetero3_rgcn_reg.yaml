@@ -1,10 +1,16 @@
-config: null
 mode: train
 rows: null
+verbosity: 1
+
+# Data
+data_path: data/datasets/
+data_split: [80, 10, 10]
+normalize: true
+
+# Graph
 graph_type: hetero3
 save_graph: hetero3_reg_graph
 load_graph: hetero3_reg_graph
-time_window: 6
 model_type: rgcn
 data_path: data/datasets/
 graph_dir: pretrained/graphs/

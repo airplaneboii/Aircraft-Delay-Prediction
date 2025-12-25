@@ -154,12 +154,15 @@ def print_available_memory():
 
 
 def move_graph_to_device(graph, device):
+    """Move all tensor attributes of a HeteroData graph to the target device."""
     for node_type in graph.node_types:
-        graph[node_type].x = graph[node_type].x.to(device)
-        if "y" in graph[node_type]:
-            graph[node_type].y = graph[node_type].y.to(device)
+        for key, val in graph[node_type].items():
+            if torch.is_tensor(val):
+                graph[node_type][key] = val.to(device)
     for edge_type in graph.edge_types:
-        graph[edge_type].edge_index = graph[edge_type].edge_index.to(device)
+        for key, val in graph[edge_type].items():
+            if torch.is_tensor(val):
+                graph[edge_type][key] = val.to(device)
     return graph
 
 
@@ -192,14 +195,14 @@ def hhmm_to_minutes(hhmm):
     return hours * 60 + minutes
 
 ################ TRAINING/VALIDATION/TESTING STATS ####################
-def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start, logger):
+def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start_time, logger):
     """Compute metrics and log resource usage for training or testing epochs.
 
     This function performs logging adjusted for the mode (train/val/test).
     Extracts mode from args.mode for appropriate logging behavior.
     """
     import time
-    epoch_time = time.time() - epoch_start
+    epoch_time = time.time() - epoch_start_time
     mode = args.mode
 
     # Metrics
@@ -216,6 +219,7 @@ def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses,
     if torch.cuda.is_available():
         try:
             gpu_mem_peak = torch.cuda.max_memory_allocated() / 1024**2
+            torch.cuda.reset_max_memory_allocated()
         except Exception:
             gpu_mem_peak = None
 

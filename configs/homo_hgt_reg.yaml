@@ -1,12 +1,13 @@
-config: null
 mode: train
 rows: null
 graph_type: homo
 save_graph: homo_reg_graph
 load_graph: homo_reg_graph
-time_window: 6
 model_type: hgt
 data_path: data/datasets/
+data_split: [80, 10, 10]
+normalize: true
+
 graph_dir: pretrained/graphs/
 model_dir: pretrained/models/
 log_dir: logs/
