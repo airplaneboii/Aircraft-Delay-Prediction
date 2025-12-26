@@ -79,35 +79,33 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
 
 
 def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
-    """Evaluate on sliding windows."""
-    # Store original ARR_DELAY if available (use feat_index mapping)
+    """Evaluate on sliding windows using induced subgraphs."""
+    from src.utils import build_window_subgraph
+    
+    print(f"Evaluating {len(window_defs)} windows using induced subgraphs")
+    
+    # Get ARR_DELAY feature index for masking
     feat_map = getattr(graph["flight"], "feat_index", None)
     if feat_map is not None and "arr_delay" in feat_map:
         arr_idx = feat_map["arr_delay"]
-        arr_delay_original = graph["flight"].x[:, arr_idx].clone()
     else:
-        arr_delay_original = None
+        arr_idx = -2  # fallback
     
     all_window_labels = []
     all_window_preds = []
     
     for window_info in tqdm(window_defs, desc=f"Evaluating {args.mode} windows", unit="window"):
-        # Restore original ARR_DELAY
-        if arr_delay_original is not None:
-            graph["flight"].x[:, arr_idx] = arr_delay_original
-        
-        # Mask ARR_DELAY for pred window (same as training)
+        learn_indices = window_info['learn_indices']
         pred_indices = window_info['pred_indices']
-        if arr_delay_original is not None:
-            graph["flight"].x[pred_indices, arr_idx] = 0.0
         
-        # Set masks for evaluation
-        learn_mask_tensor = torch.tensor(window_info['learn_mask'], dtype=torch.bool, device=graph["flight"].x.device)
-        pred_mask_tensor = torch.tensor(window_info['pred_mask'], dtype=torch.bool, device=graph["flight"].x.device)
+        # Build induced subgraph for this window
+        subgraph, local_pred_mask = build_window_subgraph(
+            graph, learn_indices, pred_indices, device=device
+        )
         
-        # Combine with eval mask (val or test split)
-        eval_learn_mask = eval_mask & learn_mask_tensor
-        eval_pred_mask = eval_mask & pred_mask_tensor
+        # Mask ARR_DELAY in the subgraph for prediction window
+        subgraph["flight"].x = subgraph["flight"].x.clone()
+        subgraph["flight"].x[local_pred_mask, arr_idx] = 0.0
         
         with torch.no_grad():
             if use_neighbor_sampling:
@@ -115,27 +113,23 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
                 logger.warning("Neighbor sampling with sliding windows not fully implemented for evaluation")
                 continue
             else:
-                # Full-batch evaluation
-                out = model(graph.x_dict, graph.edge_index_dict)
+                # Full-batch evaluation on subgraph
+                out = model(subgraph.x_dict, subgraph.edge_index_dict)
                 
                 if args.prediction_type == "regression":
-                    # Evaluate on prediction window only
-                    labels = get_labels(graph, "regression", eval_pred_mask)
-                    preds = out.squeeze(-1)[eval_pred_mask]
+                    # Evaluate on prediction window only (local_pred_mask)
+                    labels = get_labels(subgraph, "regression", local_pred_mask)
+                    preds = out.squeeze(-1)[local_pred_mask]
                     all_window_labels.append(labels.detach().cpu())
                     all_window_preds.append(preds.detach().cpu())
                 else:
                     # Use prediction-window mask for labels so lengths match preds
-                    labels = get_labels(graph, "classification", eval_pred_mask)
-                    logits = out[eval_pred_mask]
+                    labels = get_labels(subgraph, "classification", local_pred_mask)
+                    logits = out[local_pred_mask]
                     probs = torch.sigmoid(logits)
                     preds = (probs >= args.border).long()
                     all_window_labels.append(labels.detach().cpu())
                     all_window_preds.append(preds.detach().cpu())
-    
-    # Restore original ARR_DELAY
-    if arr_delay_original is not None:
-            graph["flight"].x[:, arr_idx] = arr_delay_original
     
     # Concatenate all windows and compute metrics
     labels_cat = torch.cat(all_window_labels) if all_window_labels else torch.tensor([])

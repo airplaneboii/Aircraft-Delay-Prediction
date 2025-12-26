@@ -39,17 +39,21 @@ def _save_checkpoint(model, optimizer, scheduler, args, epoch, model_path, logge
 
 
 def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=0, criterion=None):
-    """Train using sliding windows (hetero4)."""
+    """Train using sliding windows with induced subgraphs (hetero4)."""
+    from src.utils import WindowSubgraphBuilder, build_window_subgraph
+    
     print(f"\n=== Training with sliding windows: {len(window_defs)} windows per epoch ===")
+    print(f"Using induced subgraphs to prevent message passing over non-window flights")
 
     overall_start = time.time()
 
-    # Store original ARR_DELAY values to restore after each window
-    # Use named feature index if available, else fallback to -2
+    # Get ARR_DELAY feature index for masking
     arr_idx = getattr(graph["flight"], "feat_index", {}).get("arr_delay", -2)
-    arr_delay_original = graph["flight"].x[:, arr_idx].clone()
 
     num_epochs = args.epochs
+
+    # Reusable iterative builder for subgraphs across windows
+    builder = WindowSubgraphBuilder(graph)
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -59,24 +63,31 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
         all_preds = []
 
         for window_info in tqdm(window_defs, desc=f"Epoch {epoch+1}/{num_epochs}", unit="window"):
-            # Restore and mask ARR_DELAY
-            graph["flight"].x[:, arr_idx] = arr_delay_original
+            learn_indices = window_info["learn_indices"]
             pred_indices = window_info["pred_indices"]
-            graph["flight"].x[pred_indices, arr_idx] = 0.0
-
-            learn_mask_tensor = torch.tensor(window_info["learn_mask"], dtype=torch.bool, device=graph["flight"].x.device)
-            pred_mask_tensor = torch.tensor(window_info["pred_mask"], dtype=torch.bool, device=graph["flight"].x.device)
-
-            train_learn_mask = graph["flight"].train_mask & learn_mask_tensor
-            train_pred_mask = graph["flight"].train_mask & pred_mask_tensor
+            
+            # Build induced subgraph for this window (includes only window flights + connected nodes)
+            # Iterative approach: reuse the builder across windows
+            subgraph, local_pred_mask = builder.build_subgraph(
+                learn_indices, pred_indices, device=device
+            )
+            
+            # Mask ARR_DELAY in the subgraph for prediction window only
+            # Clone to avoid mutating the original subgraph across iterations
+            subgraph["flight"].x = subgraph["flight"].x.clone()
+            subgraph["flight"].x[local_pred_mask, arr_idx] = 0.0
+            
+            # Create local train mask (all flights in subgraph belong to train split already)
+            # Since we filter by window_info from train windows in main.py
+            train_mask_local = torch.ones(subgraph["flight"].x.size(0), dtype=torch.bool, device=device)
 
             optimizer.zero_grad()
             with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
-                out = model(graph.x_dict, graph.edge_index_dict)
+                out = model(subgraph.x_dict, subgraph.edge_index_dict)
 
             if args.prediction_type == "regression":
-                labels = get_labels(graph, "regression", train_pred_mask).to(device)
-                preds = out.squeeze(-1)[train_pred_mask]
+                labels = get_labels(subgraph, "regression", local_pred_mask).to(device)
+                preds = out.squeeze(-1)[local_pred_mask]
 
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_windowed via train()")
@@ -97,10 +108,10 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = get_labels(graph, "classification", train_pred_mask).to(device)
+                labels = get_labels(subgraph, "classification", local_pred_mask).to(device)
                 # Ensure logits is 1-D before masking to avoid 0-d scalar when selecting single item
                 logits_all = out.squeeze(-1)
-                logits = logits_all[train_pred_mask].to(device)
+                logits = logits_all[local_pred_mask].to(device)
 
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_windowed via train()")
@@ -122,9 +133,6 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
                 epoch_losses.append(loss.item())
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds_for_metrics)
-
-        # Restore after epoch
-        graph["flight"].x[:, arr_idx] = arr_delay_original
 
         labels_cat = torch.cat(all_labels, dim=0)
         preds_cat = torch.cat(all_preds, dim=0)

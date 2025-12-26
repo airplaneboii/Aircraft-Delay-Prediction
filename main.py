@@ -1,5 +1,6 @@
 import os
 import torch
+import numpy as np
 from src.config import get_args
 from src.graph.base import BaseGraph
 from src.graph.hetero1 import HeteroGraph1
@@ -17,7 +18,7 @@ from src.models.leakyrgcn import LeakyRGCN
 from src.train import train
 from src.test import test
 from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats, print_available_memory
-from data.data_loader import load_data
+from data.data_loader import load_data, compute_windows_from_graph, compute_splits_from_graph, compute_split_and_normalize
 
 GRAPH_BUILDERS = {
     "base": BaseGraph,
@@ -129,67 +130,83 @@ def main():
             print(f"Loading graph from {graph_path}...")
             graph = torch.load(graph_path, weights_only=False)
             graph_loaded = True
-            # Restore window_splits and norm_stats if saved with graph
+            # Restore norm_stats if saved with graph
             try:
-                if hasattr(graph, "window_splits"):
-                    window_splits = graph.window_splits
-                    print(f"Loaded window splits from graph (train: {len(window_splits.get('train', []))}, "
-                          f"val: {len(window_splits.get('val', []))}, test: {len(window_splits.get('test', []))})")
                 if hasattr(graph, "norm_stats"):
                     setattr(args, "norm_stats", graph.norm_stats)
                     print("Loaded normalization stats from graph")
             except Exception as e:
-                print(f"Warning: Could not restore window_splits/norm_stats from graph: {e}")
+                print(f"Warning: Could not restore norm_stats from graph: {e}")
             print_graph_stats(graph)
         else:
-            print(f"Graph file not found at {graph_path}. Building from sliding windows...")
+            print(f"Graph file not found at {graph_path}. Building from data...")
 
     if graph is None:
         print(f"Loading data...")
-        df, split_indices, norm_stats, loaded_windows = load_data(
+        df, norm_config = load_data(
             args.data_path,
-            mode=args.mode,
             task_type=args.prediction_type,
             max_rows=getattr(args, "rows", None),
-            split_ratios=tuple(x/100 for x in args.data_split),
             normalize_cols_file=("data/normalize.txt" if getattr(args, "normalize", True) else None),
+            normalize=getattr(args, "normalize", True),
+        )
+        
+        # Compute splits and normalization on dataframe first
+        split_indices, norm_stats = compute_split_and_normalize(
+            df,
+            split_ratios=tuple(x/100 for x in args.data_split),
+            norm_config=norm_config,
+        )
+        setattr(args, "norm_stats", norm_stats)
+        
+        # Build graph with temporary equal splits (will be overwritten)
+        print("\nBuilding graph...")
+        temp_idx = np.arange(len(df))
+        first_graph = build_graph(args, df, temp_idx, temp_idx, temp_idx, norm_stats)
+        print_graph_stats(first_graph)
+    else:
+        first_graph = graph
+
+    # Compute in_channels_dict
+    in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}
+    
+    # Always compute splits from graph (whether loaded or built)
+    # This updates graph.flight.{train/val/test}_mask which are used throughout training/testing
+    print("\nComputing splits from graph...")
+    _ = compute_splits_from_graph(
+        first_graph,
+        split_ratios=tuple(x/100 for x in args.data_split),
+    )
+    print(f"Updated graph with split masks: train={first_graph['flight'].train_mask.sum()}, "
+          f"val={first_graph['flight'].val_mask.sum()}, test={first_graph['flight'].test_mask.sum()}")
+    print("Split masks will be used for window generation and training/testing")
+
+    norm_stats = getattr(args, "norm_stats", None)
+    n_nodes = resolve_n_nodes(first_graph, df)
+    
+    # Always recompute windows from graph if sliding windows are enabled
+    # compute_windows_from_graph respects graph.flight.{train/val/test}_mask
+    if getattr(args, "use_sliding_windows", False) and first_graph is not None:
+        window_splits = compute_windows_from_graph(
+            first_graph,
             unit=getattr(args, "unit", 60),
             learn_window=getattr(args, "learn_window", 10),
             pred_window=getattr(args, "pred_window", 1),
             window_stride=getattr(args, "window_stride", 1),
-            normalize=getattr(args, "normalize", True),
-            use_sliding_windows=getattr(args, "use_sliding_windows", False),
         )
-        # Only set window_splits if not already restored from graph and if loader provided windows
-        if window_splits is None and loaded_windows is not None:
-            window_splits = loaded_windows
-        setattr(args, "norm_stats", norm_stats)
-
-    if graph is None and df is not None:
-        # Get split indices (loader now returns chronological split index arrays)
-        train_idx = split_indices['train_idx']
-        val_idx = split_indices['val_idx']
-        test_idx = split_indices['test_idx']
-        print("Biuilding graph...")
-        first_graph = build_graph(args, df, train_idx, val_idx, test_idx, norm_stats)
-        print_graph_stats(first_graph)
-        in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}
-    else:
-        first_graph = graph
-        in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}
-
-    norm_stats = getattr(args, "norm_stats", None)
-    n_nodes = resolve_n_nodes(first_graph, df)
+        print(f"Windows generated per split: train={len(window_splits['train'])}, "
+              f"val={len(window_splits['val'])}, test={len(window_splits['test'])}")
+    elif not getattr(args, "use_sliding_windows", False):
+        window_splits = None
 
     if args.save_graph and not graph_loaded and first_graph is not None:
         graph_filename = args.save_graph if args.save_graph.endswith(".pt") else f"{args.save_graph}.pt"
         graph_path = os.path.join(args.graph_dir, graph_filename)
         print(f"Saving graph to {graph_path}...")
-        # Attach window_splits and norm_stats to graph for persistence
-        first_graph.window_splits = window_splits
+        # Only persist norm_stats; windows are recomputed on load
         first_graph.norm_stats = norm_stats
         torch.save(first_graph, graph_path)
-        print("Graph saved successfully (with windows and norm_stats).")
+        print("Graph saved successfully (with norm_stats).")
     
     #####################################################################################0
     
@@ -222,7 +239,8 @@ def main():
         window_defs = prepare_window_defs(raw_train_windows, n_nodes)
 
         working_graph = first_graph
-        if not use_neighbor_sampling:
+        # When using sliding windows, keep full graph on CPU and move only subgraphs to device
+        if not use_neighbor_sampling and not window_defs:
             working_graph = move_graph_to_device(working_graph, device)
 
         if not window_defs:
@@ -253,10 +271,11 @@ def main():
         # Use the graph we already built
         if first_graph is not None:
             graph = first_graph
-            if not use_neighbor_sampling:
+            # When using sliding windows, keep full graph on CPU and move only subgraphs to device
+            if not use_neighbor_sampling and not eval_window_defs:
                 graph = move_graph_to_device(graph, device)
         elif graph_loaded and graph is not None:
-            if not use_neighbor_sampling:
+            if not use_neighbor_sampling and not eval_window_defs:
                 graph = move_graph_to_device(graph, device)
         else:
             raise RuntimeError("No graph available for evaluation")

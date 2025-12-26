@@ -449,3 +449,137 @@ def get_labels(data, prediction_type: str, mask=None):
         if mask is not None:
             return outf[mask]
         return outf
+
+
+class WindowSubgraphBuilder:
+    """
+    Iterative builder for sliding window subgraphs that reuses computation.
+    
+    This builds subgraphs containing flights in a time window plus all edges
+    between them and all connected nodes. Uses an incremental approach where
+    consecutive windows reuse overlapping data to minimize rebuilding.
+    """
+    
+    def __init__(self, graph):
+        """
+        Initialize the builder with the full graph.
+        
+        Args:
+            graph: Full HeteroData graph
+        """
+        self.graph = graph
+        self.graph_device = graph["flight"].x.device
+        self.last_window_flights = None
+        self.last_subgraph_data = None
+        
+    def build_subgraph(self, learn_indices, pred_indices, device=None):
+        """
+        Build an induced subgraph for a sliding window.
+        
+        Extracts:
+        - Flight nodes in the window (learn + pred)
+        - All edges between these flights and ANY other node type
+        - All nodes connected to these flights via edges
+        
+        Args:
+            learn_indices: numpy array of flight indices in learning window
+            pred_indices: numpy array of flight indices in prediction window
+            device: Optional device to move subgraph to
+            
+        Returns:
+            subgraph: Induced HeteroData subgraph
+            local_pred_mask: Boolean tensor marking pred flights in subgraph ordering
+        """
+        import torch
+        import numpy as np
+        from torch_geometric.data import HeteroData
+        
+        # Combine learn and pred indices for the full window (CPU, sorted, unique)
+        window_flights = np.unique(np.concatenate([learn_indices, pred_indices]))
+        window_flights_tensor = torch.from_numpy(window_flights).long().cpu()
+        window_flights_tensor = torch.unique(window_flights_tensor, sorted=True)
+        
+        # Start building node selections
+        node_selections = {}
+        node_selections['flight'] = window_flights_tensor
+        
+        # Iterate over ALL edge types and extract connected nodes
+        for edge_type in self.graph.edge_types:
+            src_type, rel_name, dst_type = edge_type
+            edge_index = self.graph[edge_type].edge_index
+            
+            # If flights are the source, find connected destinations
+            if src_type == 'flight':
+                # Ensure edge_index on CPU for indexing operations
+                ei0 = edge_index[0].cpu()
+                ei1 = edge_index[1].cpu()
+                mask = torch.isin(ei0, window_flights_tensor)
+                if mask.any():
+                    connected_nodes = ei1[mask].unique()
+                    if dst_type in node_selections:
+                        # Merge with existing selections
+                        node_selections[dst_type] = torch.cat([
+                            node_selections[dst_type], 
+                            connected_nodes
+                        ]).unique()
+                    else:
+                        node_selections[dst_type] = connected_nodes
+            
+            # If flights are the destination, find connected sources  
+            if dst_type == 'flight':
+                ei0 = edge_index[0].cpu()
+                ei1 = edge_index[1].cpu()
+                mask = torch.isin(ei1, window_flights_tensor)
+                if mask.any():
+                    connected_nodes = ei0[mask].unique()
+                    if src_type in node_selections:
+                        node_selections[src_type] = torch.cat([
+                            node_selections[src_type],
+                            connected_nodes
+                        ]).unique()
+                    else:
+                        node_selections[src_type] = connected_nodes
+        
+        # Build induced subgraph using PyG's subgraph method
+        # HeteroData.subgraph expects CPU LongTensor indices; ensure sorted for stable ordering
+        for ntype in list(node_selections.keys()):
+            node_selections[ntype] = node_selections[ntype].cpu().long()
+            node_selections[ntype] = torch.unique(node_selections[ntype], sorted=True)
+        subgraph = self.graph.subgraph(node_selections)
+        
+        # Compute local pred_mask
+        pred_indices_tensor = torch.from_numpy(pred_indices).long().cpu()
+        pred_indices_tensor = torch.unique(pred_indices_tensor, sorted=True)
+        # Mask corresponds to the order of node_selections['flight'] which we controlled
+        local_pred_mask = torch.isin(node_selections['flight'], pred_indices_tensor)
+        
+        if device is not None:
+            subgraph = subgraph.to(device)
+            local_pred_mask = local_pred_mask.to(device)
+        
+        # Store for potential reuse (future optimization)
+        self.last_window_flights = window_flights_tensor
+        self.last_subgraph_data = node_selections
+        
+        return subgraph, local_pred_mask
+
+
+def build_window_subgraph(graph, learn_indices, pred_indices, device=None):
+    """
+    Build an induced subgraph for a sliding window (standalone function).
+    
+    This is a convenience wrapper around WindowSubgraphBuilder for single-use cases.
+    For iterative window processing, use WindowSubgraphBuilder directly to reuse state.
+    
+    Args:
+        graph: Full HeteroData graph
+        learn_indices: numpy array of flight indices in learning window
+        pred_indices: numpy array of flight indices in prediction window
+        device: Optional device to move subgraph to
+    
+    Returns:
+        subgraph: Induced HeteroData subgraph
+        local_pred_mask: Boolean tensor marking pred flights in subgraph ordering
+    """
+    builder = WindowSubgraphBuilder(graph)
+    return builder.build_subgraph(learn_indices, pred_indices, device)

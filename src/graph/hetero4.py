@@ -134,6 +134,10 @@ class HeteroGraph4:
             self.df["dep_timestamp_norm"] = ((self.df["dep_timestamp"] - min_timestamp).dt.total_seconds() / timestamp_range).astype(np.float32)
         else:
             self.df["dep_timestamp_norm"] = 0.0
+
+        # Also store absolute minutes since the first timestamp for downstream windowing
+        # This preserves the real temporal extent (days/months) for unit-based windows
+        self.df["dep_timestamp_minutes"] = ((self.df["dep_timestamp"] - min_timestamp).dt.total_seconds() / 60.0).astype(np.float32)
         
         # Flight features including ARR_DELAY (will be masked during val/test)
         flight_features = []
@@ -164,8 +168,9 @@ class HeteroGraph4:
             "is_train": feat_dim - 1,
         }
         
-        # Store original timestamps for temporal analysis
+        # Store normalized and absolute minute timestamps on flight nodes
         data["flight"].timestamp = torch.tensor(self.df["dep_timestamp_norm"].values, dtype=torch.float32)
+        data["flight"].timestamp_min = torch.tensor(self.df["dep_timestamp_minutes"].values, dtype=torch.float32)
         
         # Store original indices for mask operations
         data["flight"].original_index = torch.arange(len(self.df), dtype=torch.long)
