@@ -1,0 +1,49 @@
+mode: train
+verbosity: 1
+rows: null
+
+# Data
+data_path: data/datasets/
+data_split: [80, 10, 10]
+normalize: true
+use_sliding_windows: true
+
+# Sliding Window
+unit: 60
+learn_window: 10
+pred_window: 1
+window_stride: 1
+
+# Graph
+graph_type: hetero4
+save_graph: hetero4_reg_graph
+load_graph: hetero4_reg_graph
+
+# Model
+model_type: hgt
+prediction_type: regression
+model_file: hetero4_hgt_reg
+border: 0.6
+
+# Training
+epochs: 50
+lr: 1e-03
+weight_decay: 1e-06
+batch_size: 800000
+criterion: huber
+
+# Neighbor Sampling
+neighbor_sampling: false
+neighbor_fanouts: "15,10"
+
+# Performance
+amp: false
+compile: false
+compile_backend: inductor
+compile_mode: default
+resume: false
+
+# Directories
+graph_dir: pretrained/graphs/
+model_dir: pretrained/models/
+log_dir: logs/

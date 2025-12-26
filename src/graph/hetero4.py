@@ -155,6 +155,14 @@ class HeteroGraph4:
             flight_features.append(feat)
         
         data["flight"].x = torch.tensor(np.array(flight_features), dtype=torch.float32)
+
+        # Store feature name -> column index mapping for robustness
+        feat_dim = data["flight"].x.size(1)
+        # ARR_DELAY was appended second-to-last, training mask is last
+        data["flight"].feat_index = {
+            "arr_delay": feat_dim - 2,
+            "is_train": feat_dim - 1,
+        }
         
         # Store original timestamps for temporal analysis
         data["flight"].timestamp = torch.tensor(self.df["dep_timestamp_norm"].values, dtype=torch.float32)
@@ -222,9 +230,14 @@ class HeteroGraph4:
 
         ######### LABELS AND MASKS ############
         
+        # Labels: use ARR_DEL15 for classification (binary), ARR_DELAY for regression
         if self.classification:
-            border = getattr(self.args, "border", 0.45)
-            labels = (self.df["ARR_DELAY"] >= border * 60).astype(int).values
+            if "ARR_DEL15" not in self.df.columns:
+                # Fallback to thresholding ARR_DELAY if ARR_DEL15 missing
+                border = getattr(self.args, "border", 0.45)
+                labels = (self.df["ARR_DELAY"] >= border * 60).astype(int).values
+            else:
+                labels = self.df["ARR_DEL15"].astype(int).values
             data["flight"].y = torch.tensor(labels, dtype=torch.long).unsqueeze(1)
         else:
             labels = self.df["ARR_DELAY"].values

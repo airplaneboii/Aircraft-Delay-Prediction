@@ -45,7 +45,9 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
     overall_start = time.time()
 
     # Store original ARR_DELAY values to restore after each window
-    arr_delay_original = graph["flight"].x[:, -2].clone()
+    # Use named feature index if available, else fallback to -2
+    arr_idx = getattr(graph["flight"], "feat_index", {}).get("arr_delay", -2)
+    arr_delay_original = graph["flight"].x[:, arr_idx].clone()
 
     num_epochs = args.epochs
 
@@ -58,9 +60,9 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
 
         for window_info in tqdm(window_defs, desc=f"Epoch {epoch+1}/{num_epochs}", unit="window"):
             # Restore and mask ARR_DELAY
-            graph["flight"].x[:, -2] = arr_delay_original
+            graph["flight"].x[:, arr_idx] = arr_delay_original
             pred_indices = window_info["pred_indices"]
-            graph["flight"].x[pred_indices, -2] = 0.0
+            graph["flight"].x[pred_indices, arr_idx] = 0.0
 
             learn_mask_tensor = torch.tensor(window_info["learn_mask"], dtype=torch.bool, device=graph["flight"].x.device)
             pred_mask_tensor = torch.tensor(window_info["pred_mask"], dtype=torch.bool, device=graph["flight"].x.device)
@@ -120,7 +122,7 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
                 all_preds.append(preds_for_metrics)
 
         # Restore after epoch
-        graph["flight"].x[:, -2] = arr_delay_original
+        graph["flight"].x[:, arr_idx] = arr_delay_original
 
         labels_cat = torch.cat(all_labels, dim=0)
         preds_cat = torch.cat(all_preds, dim=0)

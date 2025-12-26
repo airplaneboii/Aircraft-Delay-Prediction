@@ -82,7 +82,8 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
     """Evaluate on sliding windows."""
     # Store original ARR_DELAY if masking is needed (for hetero4)
     if "ARR_DELAY" in [col for col in range(graph["flight"].x.size(1))]:
-        arr_delay_original = graph["flight"].x[:, -2].clone()
+        arr_idx = getattr(graph["flight"], "feat_index", {}).get("arr_delay", -2)
+        arr_delay_original = graph["flight"].x[:, arr_idx].clone()
     else:
         arr_delay_original = None
     
@@ -92,12 +93,12 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
     for window_info in tqdm(window_defs, desc=f"Evaluating {args.mode} windows", unit="window"):
         # Restore original ARR_DELAY
         if arr_delay_original is not None:
-            graph["flight"].x[:, -2] = arr_delay_original
+            graph["flight"].x[:, arr_idx] = arr_delay_original
         
         # Mask ARR_DELAY for pred window (same as training)
         pred_indices = window_info['pred_indices']
         if arr_delay_original is not None:
-            graph["flight"].x[pred_indices, -2] = 0.0
+            graph["flight"].x[pred_indices, arr_idx] = 0.0
         
         # Set masks for evaluation
         learn_mask_tensor = torch.tensor(window_info['learn_mask'], dtype=torch.bool, device=graph["flight"].x.device)
@@ -132,7 +133,7 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
     
     # Restore original ARR_DELAY
     if arr_delay_original is not None:
-        graph["flight"].x[:, -2] = arr_delay_original
+            graph["flight"].x[:, arr_idx] = arr_delay_original
     
     # Concatenate all windows and compute metrics
     labels_cat = torch.cat(all_window_labels) if all_window_labels else torch.tensor([])
