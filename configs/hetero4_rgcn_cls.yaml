@@ -16,13 +16,13 @@ window_stride: 1
 
 # Graph
 graph_type: hetero4
-save_graph: hetero4_class_graph
-load_graph: hetero4_class_graph
+save_graph: hetero4_graph
+load_graph: hetero4_graph
 
 # Model
 model_type: rgcn
 prediction_type: classification
-model_file: hetero4_rgcn_class
+model_file: hetero4_rgcn_cls
 border: 0.6
 
 # Training

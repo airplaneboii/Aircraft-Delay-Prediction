@@ -165,7 +165,7 @@ def main():
         train_idx = split_indices['train_idx']
         val_idx = split_indices['val_idx']
         test_idx = split_indices['test_idx']
-
+        print("Biuilding graph...")
         first_graph = build_graph(args, df, train_idx, val_idx, test_idx, norm_stats)
         print_graph_stats(first_graph)
         in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}

@@ -205,11 +205,19 @@ class Hetero2Nodes:
             [next_dst, next_src], dtype=torch.long
         )
 
-        # ==============================================================================
+        # ======================================================================
         # 4. LABELS & MASKS (On Flight Nodes)
-        # ==============================================================================
-        y = torch.tensor(self.df["ARR_DELAY"].fillna(0).to_numpy(dtype=np.float32)).unsqueeze(1)
-        data["flight"].y = y
+        # ======================================================================
+        arr_delay_vals = self.df["ARR_DELAY"].fillna(0.0).astype(float).to_numpy()
+        data["flight"].y_reg = torch.tensor(arr_delay_vals, dtype=torch.float32).unsqueeze(1)
+
+        if "ARR_DEL15" in self.df.columns:
+            cls_vals = self.df["ARR_DEL15"].astype(int).to_numpy()
+        else:
+            border = getattr(self.args, "border", 0.45)
+            cls_vals = (self.df["ARR_DELAY"].fillna(0.0) >= border * 60).astype(int).to_numpy()
+        data["flight"].y_cls = torch.tensor(cls_vals, dtype=torch.float32).unsqueeze(1)
+
 
         train_mask = torch.zeros(num_flights, dtype=torch.bool)
         val_mask   = torch.zeros(num_flights, dtype=torch.bool)

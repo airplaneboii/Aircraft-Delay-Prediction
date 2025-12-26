@@ -16,8 +16,8 @@ window_stride: 1
 
 # Graph
 graph_type: hetero1
-save_graph: hetero1_reg_graph
-load_graph: hetero1_reg_graph
+save_graph: hetero1_graph
+load_graph: hetero1_graph
 
 # Model
 model_type: rgcn

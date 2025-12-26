@@ -137,11 +137,16 @@ class HomoGraph:
         edge_store.edge_attr = torch.tensor(edge_attr, dtype=torch.float)
 
         # ---------- Edge labels and split masks (edge-level regression/classification) ----------
-        if self.classification:
-            y = torch.tensor(self.df["ARR_DEL15"].fillna(0).to_numpy(dtype=np.float32)).unsqueeze(1)
+        arr_delay_vals = self.df["ARR_DELAY"].fillna(0.0).to_numpy(dtype=np.float32)
+        edge_store.edge_label_reg = torch.tensor(arr_delay_vals).unsqueeze(1)
+
+        if "ARR_DEL15" in self.df.columns:
+            cls_vals = self.df["ARR_DEL15"].fillna(0).astype(int).to_numpy()
         else:
-            y = torch.tensor(self.df["ARR_DELAY"].fillna(0).to_numpy(dtype=np.float32)).unsqueeze(1)
-        edge_store.edge_label = y
+            border = getattr(self.args, "border", 0.45)
+            cls_vals = (self.df["ARR_DELAY"].fillna(0.0) >= border * 60).astype(int).to_numpy()
+        edge_store.edge_label_cls = torch.tensor(cls_vals, dtype=torch.float32).unsqueeze(1)
+
 
         train_mask = torch.zeros(num_flights, dtype=torch.bool)
         val_mask   = torch.zeros(num_flights, dtype=torch.bool)

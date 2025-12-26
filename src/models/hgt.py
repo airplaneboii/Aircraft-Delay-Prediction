@@ -54,20 +54,14 @@ class HGT(nn.Module):
         # HGT propagation
         for conv in self.convs:
             out_dict = conv(x_dict, edge_index_dict)
-            x_dict_new = {}
 
-            for nodeType in x_dict:
+            for nodeType, h_prev in x_dict.items():
                 out = out_dict.get(nodeType, None)
-                if out is None:
-                    h = x_dict[nodeType]
-                else:
-                    h = x_dict[nodeType] + out
+                h = h_prev if out is None else h_prev + out
                 h = self.norms[nodeType](h)
-                h = F.relu(h)
+                h = F.relu(h, inplace=True)   # inplace
                 h = self.dropout(h)
-                x_dict_new[nodeType] = h
-
-            x_dict = x_dict_new
+                x_dict[nodeType] = h          # reuse same dict entry
        
         # Final prediction for flight nodes
         flight_out = self.flight_head(x_dict["flight"]).squeeze(-1)

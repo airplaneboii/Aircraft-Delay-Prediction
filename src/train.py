@@ -3,7 +3,7 @@ import torch
 import time
 from datetime import datetime
 from torch import nn, optim
-from src.utils import compute_epoch_stats, resolve_fanouts
+from src.utils import compute_epoch_stats, resolve_fanouts, get_labels
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.data import HeteroData
 import logging
@@ -75,7 +75,7 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
                 out = model(graph.x_dict, graph.edge_index_dict)
 
             if args.prediction_type == "regression":
-                labels = graph["flight"].y.squeeze(-1)[train_pred_mask].to(device)
+                labels = get_labels(graph, "regression", train_pred_mask).to(device)
                 preds = out.squeeze(-1)[train_pred_mask]
 
                 if criterion is None:
@@ -97,8 +97,10 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = graph["flight"].y.view(-1).float()[train_pred_mask].to(device)
-                logits = out[train_pred_mask].squeeze(-1)
+                labels = get_labels(graph, "classification", train_pred_mask).to(device)
+                # Ensure logits is 1-D before masking to avoid 0-d scalar when selecting single item
+                logits_all = out.squeeze(-1)
+                logits = logits_all[train_pred_mask].to(device)
 
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_windowed via train()")
@@ -168,15 +170,16 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
 
                 if args.prediction_type == "regression":
-                    labels = batch["flight"].y.squeeze(-1)[:flight_batch_size].to(device)
+                    labels = get_labels(batch, "regression")[:flight_batch_size].to(device)
                     preds = out.squeeze(-1)[:flight_batch_size]
                     if criterion is None:
                         raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
                     loss = criterion(preds, labels)
                     preds_for_metrics = preds.detach().cpu()
                 else:
-                    labels_full = batch["flight"].y.view(-1).float()[:flight_batch_size].to(device)
-                    logits_full = out[:flight_batch_size]
+                    labels_full = get_labels(batch, "classification")[:flight_batch_size].to(device)
+                    # Make logits 1-D for consistent indexing
+                    logits_full = out[:flight_batch_size].squeeze(-1)
                     labels = labels_full
                     pos_mask = labels_full == 1
                     neg_mask = labels_full == 0
@@ -225,7 +228,7 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 else:
                     mask = base_mask
 
-                labels = graph["flight"].y.squeeze(-1)[mask].to(device)
+                labels = get_labels(graph, "regression", mask).to(device)
                 preds = out.squeeze(-1)[mask]
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
@@ -246,8 +249,10 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 all_preds.append(preds_for_metrics)
             else:
                 mask = graph["flight"].train_mask
-                labels = graph["flight"].y.view(-1).float()[mask].to(device)
-                logits = out[mask].squeeze(-1)
+                labels = get_labels(graph, "classification", mask).to(device)
+                # Ensure logits is 1-D before masking
+                logits_all = out.squeeze(-1)
+                logits = logits_all[mask].to(device)
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
                 loss = criterion(logits, labels)
@@ -321,7 +326,7 @@ def train(
         else:
             raise ValueError(f"Unknown regression criterion: {args.criterion}")
     else:
-        y = graph["flight"].y[graph["flight"].train_mask].view(-1)
+        y = get_labels(graph, "classification", graph["flight"].train_mask).view(-1)
         num_pos = (y == 1).sum().item()
         num_neg = (y == 0).sum().item()
         print(num_pos, num_neg)

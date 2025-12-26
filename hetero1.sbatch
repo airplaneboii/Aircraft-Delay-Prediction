@@ -69,14 +69,14 @@ RUN -c /app/configs/hetero1_hgt_reg.yaml
 RUN -c /app/configs/hetero1_hgt_reg.yaml -m val
 RUN -c /app/configs/hetero1_hgt_reg.yaml -m test
 
-RUN -c /app/configs/hetero1_hgt_class.yaml
-RUN -c /app/configs/hetero1_hgt_class.yaml -m val
-RUN -c /app/configs/hetero1_hgt_class.yaml -m test
+RUN -c /app/configs/hetero1_hgt_cls.yaml
+RUN -c /app/configs/hetero1_hgt_cls.yaml -m val
+RUN -c /app/configs/hetero1_hgt_cls.yaml -m test
 
 RUN -c /app/configs/hetero1_rgcn_reg.yaml
 RUN -c /app/configs/hetero1_rgcn_reg.yaml -m val
 RUN -c /app/configs/hetero1_rgcn_reg.yaml -m test
 
-RUN -c /app/configs/hetero1_rgcn_class.yaml
-RUN -c /app/configs/hetero1_rgcn_class.yaml -m val
-RUN -c /app/configs/hetero1_rgcn_class.yaml -m test
+RUN -c /app/configs/hetero1_rgcn_cls.yaml
+RUN -c /app/configs/hetero1_rgcn_cls.yaml -m val
+RUN -c /app/configs/hetero1_rgcn_cls.yaml -m test

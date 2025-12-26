@@ -338,14 +338,28 @@ def print_graph_stats(data: HeteroData):
         print(f"\n  >>> TOTAL EDGES: {total_edges:,}")
         print(f"  >>> EDGE MEMORY: {edge_total_bytes / (1024*1024):.2f} MB")
 
-        # Labels / other tensors
-        y = getattr(data['flight'], 'y', None)
+        # Labels / other tensors (regression/classification stored separately)
         label_bytes = 0
-        if isinstance(y, torch.Tensor):
-            label_bytes = _sizeof(y)
-            mb = label_bytes / (1024 * 1024)
+        y_reg = getattr(data['flight'], 'y_reg', None)
+        y_cls = getattr(data['flight'], 'y_cls', None)
+        any_label_printed = False
+        if isinstance(y_reg, torch.Tensor):
+            lb = _sizeof(y_reg)
+            label_bytes += lb
+            mb = lb / (1024 * 1024)
             print(f"\nLABELS:")
-            print(f"  flight.y: shape={tuple(y.shape)}, dtype={y.dtype}, memory={mb:.2f} MB")
+            print(f"  flight.y_reg: shape={tuple(y_reg.shape)}, dtype={y_reg.dtype}, memory={mb:.2f} MB")
+            any_label_printed = True
+        if isinstance(y_cls, torch.Tensor):
+            lb = _sizeof(y_cls)
+            label_bytes += lb
+            mb = lb / (1024 * 1024)
+            if not any_label_printed:
+                print(f"\nLABELS:")
+            print(f"  flight.y_cls: shape={tuple(y_cls.shape)}, dtype={y_cls.dtype}, memory={mb:.2f} MB")
+            any_label_printed = True
+        if not any_label_printed:
+            print("\nLABELS: None stored on flight nodes")
 
         # Grand totals
         total_bytes = node_total_bytes + edge_total_bytes + label_bytes
@@ -397,3 +411,41 @@ def resolve_fanouts(model, fanouts):
         else:
             fanouts = fanouts[:depth]
     return fanouts
+
+
+def get_labels(data, prediction_type: str, mask=None):
+    """Return labels for `data['flight']` according to prediction_type.
+
+    - If `prediction_type=='regression'` returns regression targets (y_reg or y).
+    - If classification returns classification targets (y_cls if present, else thresholded ARR_DELAY).
+
+    If `mask` is provided, it is applied to the flattened label vector before return.
+    Returned tensor is 1-D (squeezed) and for classification is a float tensor (0./1.) suitable
+    for `BCEWithLogitsLoss`.
+    """
+    y_reg = getattr(data['flight'], 'y_reg', None)
+    y_cls = getattr(data['flight'], 'y_cls', None)
+    y_default = getattr(data['flight'], 'y', None)
+
+    if prediction_type == 'regression':
+        if y_reg is None and y_default is None:
+            raise ValueError('No regression labels found on graph (y_reg or y)')
+        src = y_reg if y_reg is not None else y_default
+        out = src.squeeze(-1)
+        if mask is not None:
+            return out[mask]
+        return out
+    else:
+        # classification
+        if y_cls is not None:
+            out = y_cls.view(-1)
+        else:
+            # Fallback: threshold ARR_DELAY >= 15 minutes
+            if y_default is None:
+                raise ValueError('No classification labels (y_cls) or ARR_DELAY (y) available')
+            out = (y_default.squeeze(-1) >= 15).long()
+        # Return float (0./1.) for BCEWithLogitsLoss compatibility
+        outf = out.float()
+        if mask is not None:
+            return outf[mask]
+        return outf

@@ -2,7 +2,7 @@ import time
 import torch
 import logging
 from tqdm.auto import tqdm
-from src.utils import resolve_fanouts
+from src.utils import resolve_fanouts, get_labels
 
 try:
     import psutil
@@ -41,12 +41,12 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
                 flight_batch_size = getattr(batch["flight"], "batch_size", batch["flight"].x.size(0))
 
                 if args.prediction_type == "regression":
-                    labels = batch["flight"].y.squeeze(-1)[:flight_batch_size]
+                    labels = get_labels(batch, "regression")[:flight_batch_size]
                     preds = out.squeeze(-1)[:flight_batch_size]
                     all_labels.append(labels.detach().cpu())
                     all_preds.append(preds.detach().cpu())
                 else:
-                    labels = batch["flight"].y.view(-1).float()[:flight_batch_size]
+                    labels = get_labels(batch, "classification")[:flight_batch_size]
                     logits = out[:flight_batch_size]
                     probs = torch.sigmoid(logits)
                     preds = (probs >= args.border).long()
@@ -58,12 +58,12 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
             out = model(graph.x_dict, graph.edge_index_dict)
             
             if args.prediction_type == "regression":
-                labels = graph["flight"].y.float().squeeze(-1)[eval_mask]
+                labels = get_labels(graph, "regression", eval_mask)
                 preds = out.squeeze(-1)[eval_mask]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = graph["flight"].y.float()[eval_mask]
+                labels = get_labels(graph, "classification", eval_mask)
                 logits = out[eval_mask]
                 probs = torch.sigmoid(logits)
                 preds = (probs >= args.border).long()
@@ -119,12 +119,12 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
                 
                 if args.prediction_type == "regression":
                     # Evaluate on prediction window only
-                    labels = graph["flight"].y.float().squeeze(-1)[eval_pred_mask]
+                    labels = get_labels(graph, "regression", eval_pred_mask)
                     preds = out.squeeze(-1)[eval_pred_mask]
                     all_window_labels.append(labels.detach().cpu())
                     all_window_preds.append(preds.detach().cpu())
                 else:
-                    labels = graph["flight"].y.float()[eval_pred_mask]
+                    labels = get_labels(graph, "classification", eval_mask)
                     logits = out[eval_pred_mask]
                     probs = torch.sigmoid(logits)
                     preds = (probs >= args.border).long()

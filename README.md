@@ -85,11 +85,11 @@ python main.py -h
 ### Using configs (recommended)
 Config files are stored in `configs/`, the config with all the default values being `configs/defaults.yaml`.
 ```bash
-python main.py -c configs/hetero3_rgcn_class.yaml
+python main.py -c configs/hetero3_rgcn_cls.yaml
 ```
 You can override any option from CLI:
 ```bash
-python main.py -c configs/hetero3_rgcn_class.yaml --mode test --neighbor_sampling
+python main.py -c configs/hetero3_rgcn_cls.yaml --mode test --neighbor_sampling
 ```
 
 ### Graph and model files
@@ -100,13 +100,13 @@ python main.py -c configs/hetero3_rgcn_class.yaml --mode test --neighbor_samplin
 Examples:
 ```bash
 # Build a graph and save it
-python main.py -c configs/hetero3_rgcn_class.yaml -s hetero3_class
+python main.py -c configs/hetero3_rgcn_cls.yaml -s hetero3_class
 
 # Load a saved graph and train a model
-python main.py -c configs/hetero3_rgcn_class.yaml -l hetero3_class --mode train
+python main.py -c configs/hetero3_rgcn_cls.yaml -l hetero3_class --mode train
 
 # Evaluate using the latest dataset in data/datasets/
-python main.py -c configs/hetero3_rgcn_class.yaml --mode test
+python main.py -c configs/hetero3_rgcn_cls.yaml --mode test
 ```
 
 ### Available options

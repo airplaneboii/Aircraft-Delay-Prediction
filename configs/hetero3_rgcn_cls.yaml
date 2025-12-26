@@ -16,13 +16,13 @@ window_stride: 1
 
 # Graph
 graph_type: hetero3
-save_graph: hetero3_class_graph
-load_graph: hetero3_class_graph
+save_graph: hetero3_graph
+load_graph: hetero3_graph
 
 # Model
-model_type: hgt
+model_type: rgcn
 prediction_type: classification
-model_file: hetero3_hgt_class
+model_file: hetero3_rgcn_cls
 border: 0.6
 
 # Training

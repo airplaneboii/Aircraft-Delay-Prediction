@@ -1,9 +1,9 @@
 mode: train
 rows: null
 graph_type: homo
-save_graph: homo_class_graph
-load_graph: homo_class_graph
-model_type: hgt
+save_graph: homo_graph
+load_graph: homo_graph
+model_type: rgcn
 data_path: data/datasets/
 data_split: [80, 10, 10]
 normalize: true
@@ -12,7 +12,7 @@ use_sliding_windows: false
 graph_dir: pretrained/graphs/
 model_dir: pretrained/models/
 log_dir: logs/
-model_file: homo_hgt_class
+model_file: homo_rgcn_cls
 criterion: huber
 amp: false
 compile: false

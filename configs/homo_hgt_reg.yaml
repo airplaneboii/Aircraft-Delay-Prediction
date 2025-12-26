@@ -1,8 +1,8 @@
 mode: train
 rows: null
 graph_type: homo
-save_graph: homo_reg_graph
-load_graph: homo_reg_graph
+save_graph: homo_graph
+load_graph: homo_graph
 model_type: hgt
 data_path: data/datasets/
 data_split: [80, 10, 10]

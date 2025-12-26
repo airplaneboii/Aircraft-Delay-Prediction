@@ -351,11 +351,17 @@ class HeteroGraph3:
         data["flight"].val_mask = val_mask
         data["flight"].test_mask = test_mask
 
-        #label for predicting arrival delays
-        if self.classification:
-            data["flight"].y = torch.tensor(self.df["ARR_DEL15"].fillna(0).values, dtype=torch.float).unsqueeze(1)
+        # Labels: store both regression and classification targets for backward compatibility
+        arr_delay_vals = self.df["ARR_DELAY"].fillna(0.0).astype(float).values
+        data["flight"].y_reg = torch.tensor(arr_delay_vals, dtype=torch.float32).unsqueeze(1)
+
+        if "ARR_DEL15" in self.df.columns:
+            cls_vals = self.df["ARR_DEL15"].astype(int).values
         else:
-            data["flight"].y = torch.tensor(self.df["ARR_DELAY"].fillna(0).values, dtype=torch.float).unsqueeze(1)
+            border = getattr(self.args, "border", 0.45)
+            cls_vals = (self.df["ARR_DELAY"].fillna(0.0) >= border * 60).astype(int).values
+        data["flight"].y_cls = torch.tensor(cls_vals, dtype=torch.float32).unsqueeze(1)
+
 
         # Attach norm_stats and split indexes so the graph is self-contained when saved
         try:

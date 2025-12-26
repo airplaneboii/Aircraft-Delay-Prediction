@@ -16,8 +16,8 @@ window_stride: 1
 
 # Graph
 graph_type: hetero4
-save_graph: hetero4_reg_graph
-load_graph: hetero4_reg_graph
+save_graph: hetero4_graph
+load_graph: hetero4_graph
 
 # Model
 model_type: hgt

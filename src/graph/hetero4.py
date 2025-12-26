@@ -230,18 +230,21 @@ class HeteroGraph4:
 
         ######### LABELS AND MASKS ############
         
-        # Labels: use ARR_DEL15 for classification (binary), ARR_DELAY for regression
-        if self.classification:
-            if "ARR_DEL15" not in self.df.columns:
-                # Fallback to thresholding ARR_DELAY if ARR_DEL15 missing
-                border = getattr(self.args, "border", 0.45)
-                labels = (self.df["ARR_DELAY"] >= border * 60).astype(int).values
-            else:
-                labels = self.df["ARR_DEL15"].astype(int).values
-            data["flight"].y = torch.tensor(labels, dtype=torch.long).unsqueeze(1)
+        # Labels: store both regression and classification targets for backward compatibility
+        # Regression target (ARR_DELAY) as float32
+        arr_delay_vals = self.df["ARR_DELAY"].fillna(0.0).astype(float).values
+        data["flight"].y_reg = torch.tensor(arr_delay_vals, dtype=torch.float32).unsqueeze(1)
+
+        # Classification target: prefer ARR_DEL15 column if present, else compute from ARR_DELAY
+        if "ARR_DEL15" in self.df.columns:
+            cls_vals = self.df["ARR_DEL15"].astype(int).values
         else:
-            labels = self.df["ARR_DELAY"].values
-            data["flight"].y = torch.tensor(labels, dtype=torch.float32).unsqueeze(1)
+            border = getattr(self.args, "border", 0.45)
+            # legacy behavior used border * 60 threshold; keep that for compatibility
+            cls_vals = (self.df["ARR_DELAY"].fillna(0.0) >= border * 60).astype(int).values
+        data["flight"].y_cls = torch.tensor(cls_vals, dtype=torch.float32).unsqueeze(1)
+
+        # Backwards-compatible `y` attribute: keep previous single-target `y` for older code
         
         # Store masks for train/val/test splits
         train_mask = torch.zeros(len(self.df), dtype=torch.bool)

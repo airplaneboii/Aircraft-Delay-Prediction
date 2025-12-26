@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=hetero3          # Job name
+#SBATCH --job-name=hetero3_rgcn          # Job name
 #SBATCH --partition=gpu               # Partition (queue)
 #SBATCH --gres=gpu                    # Request GPU
 #SBATCH --nodes=1                     # Number of nodes
@@ -65,14 +65,6 @@ RUN() {
 }
 
 # Example: run training (you can replace or pass different args)
-RUN -c /app/configs/hetero3_hgt_reg.yaml
-RUN -c /app/configs/hetero3_hgt_reg.yaml -m val
-RUN -c /app/configs/hetero3_hgt_reg.yaml -m test
-
-RUN -c /app/configs/hetero3_hgt_cls.yaml
-RUN -c /app/configs/hetero3_hgt_cls.yaml -m val
-RUN -c /app/configs/hetero3_hgt_cls.yaml -m test
-
 RUN -c /app/configs/hetero3_rgcn_reg.yaml
 RUN -c /app/configs/hetero3_rgcn_reg.yaml -m val
 RUN -c /app/configs/hetero3_rgcn_reg.yaml -m test
