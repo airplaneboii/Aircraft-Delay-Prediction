@@ -13,6 +13,7 @@ verbosity: 1  # 0=WARNING, 1=INFO, 2=DEBUG
 data_path: "data/datasets/2M_20251221_210514.csv"
 data_split: [80, 10, 10]  # train/val/test split percentages
 normalize: true  # enable normalization
+use_sliding_windows: true  # use sliding window approach for temporal training
 
 # ========================================
 # Sliding Window Parameters
@@ -27,7 +28,7 @@ window_stride: 1  # Slide by 1 unit (1 hour)
 # ========================================
 graph_type: hetero4
 save_graph: hetero4_2M
-load_graph: 
+load_graph: hetero4_2M
 
 # ========================================
 # Model

@@ -15,6 +15,7 @@ DEFAULT_ROWS = None
 DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_NORMALIZE = True
 DEFAULT_DATA_SPLIT = "80,10,10"
+DEFAULT_USE_SLIDING_WINDOWS = False
 
 # --- Sliding Window ---
 DEFAULT_UNIT = 60  # minutes per time unit
@@ -120,6 +121,8 @@ def get_args():
     # ========================================
     # Sliding Window Parameters
     # ========================================
+    parser.add_argument("--use_sliding_windows", type=str2bool, default=DEFAULT_USE_SLIDING_WINDOWS,
+                        help=f"Use sliding windows for temporal training, or full split if False (default: {DEFAULT_USE_SLIDING_WINDOWS})")
     parser.add_argument("--unit", type=int, default=DEFAULT_UNIT,
                         help=f"Time unit in minutes (default: {DEFAULT_UNIT})")
     parser.add_argument("--learn_window", type=int, default=DEFAULT_LEARN_WINDOW,

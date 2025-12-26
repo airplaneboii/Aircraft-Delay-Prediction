@@ -1,16 +1,182 @@
 import os
-import warnings
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import TimeSeriesSplit
+#from sklearn.model_selection import TimeSeriesSplit
 from .splitter import split_file_to_list
 from src.utils import hhmm_to_minutes
 
 # Suppress pandas FutureWarning about dtype assignment during normalization
 # warnings.filterwarnings('ignore', category=FutureWarning, message='.*Setting an item of incompatible dtype.*')
 
-
 def load_data(
+    path: str,
+    mode: str = "train",
+    task_type: str = "regression",
+    max_rows: int | None = None,
+    split_ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
+    normalize_cols_file: str | None = None,
+    unit: int = 60,
+    learn_window: int = 10,
+    pred_window: int = 1,
+    window_stride: int = 1,
+    normalize: bool = True,
+    use_sliding_windows: bool = False,
+) -> tuple[pd.DataFrame, dict, dict, dict | None]:
+    """Dispatcher function that chooses between legacy and sliding window loaders.
+    
+    Args:
+        use_sliding_windows: If True, use sliding windows; if False, use legacy chronological split.
+        (other args passed through to the chosen loader)
+    
+    Returns:
+        df: Full dataframe sorted by time
+        split_indices: Dict with train_idx, val_idx, test_idx
+        norm_stats: Normalization statistics
+        window_splits: Dict with 'train'/'val'/'test' windows (None if not using sliding windows)
+    """
+    
+    if use_sliding_windows:
+        df, split_indices, norm_stats, window_splits = load_data_sliding_windows(
+            path=path,
+            mode=mode,
+            task_type=task_type,
+            max_rows=max_rows,
+            split_ratios=split_ratios,
+            normalize_cols_file=normalize_cols_file,
+            unit=unit,
+            learn_window=learn_window,
+            pred_window=pred_window,
+            window_stride=window_stride,
+            normalize=normalize,
+        )
+        return df, split_indices, norm_stats, window_splits
+    else:
+        df, split_indices, norm_stats = load_data_legacy(
+            path=path,
+            mode=mode,
+            task_type=task_type,
+            max_rows=max_rows,
+            split_ratios=split_ratios,
+            normalize_cols_file=normalize_cols_file,
+            normalize=normalize,
+        )
+        return df, split_indices, norm_stats, None
+
+
+def load_data_legacy(
+    path: str,
+    mode: str = "train",
+    task_type: str = "regression",
+    max_rows: int | None = None,
+    split_ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
+    normalize_cols_file: str | None = None,
+    normalize: bool = True,
+) -> tuple[pd.DataFrame, dict, dict]:
+    """Load data with chronological train/val/test split (no sliding windows).
+    
+    Returns:
+        df: Full dataframe sorted by time with 'split' column
+        split_indices: Dict with numpy arrays for chronological split indices
+        norm_stats: Normalization statistics
+    """
+    
+    if max_rows and max_rows > 0:
+        df = pd.read_csv(path, nrows=int(max_rows))
+        df = df.reset_index(drop=True)
+        print(f"Row cap enabled: reading first {int(max_rows)} rows.")
+    else:
+        df = pd.read_csv(path)
+
+    # Remove cancelled flights for delay prediction
+    if "CANCELLED" in df.columns:
+        df = df[df["CANCELLED"] == 0].reset_index(drop=True)
+
+    # Ensure arrival delays are non-negative: set negative ARR_DELAY to 0
+    if "ARR_DELAY" in df.columns:
+        df["ARR_DELAY"] = pd.to_numeric(df["ARR_DELAY"], errors="coerce")
+        df["ARR_DELAY"] = df["ARR_DELAY"].clip(lower=0).fillna(0)
+
+    if task_type == "regression":
+        df["y"] = df["ARR_DELAY"] if "ARR_DELAY" in df.columns else 0
+    else:
+        df["y"] = df["ARR_DEL15"] if "ARR_DEL15" in df.columns else 0
+
+    # Build timestamps
+    if "FL_DATE" not in df.columns or not pd.api.types.is_datetime64_any_dtype(df["FL_DATE"]):
+        df["FL_DATE"] = pd.to_datetime(
+            df[["YEAR", "MONTH", "DAY_OF_MONTH"]].rename(columns={"YEAR": "year", "MONTH": "month", "DAY_OF_MONTH": "day"})
+        )
+    
+    df["dep_minutes"] = df["CRS_DEP_TIME"].apply(hhmm_to_minutes)
+    df["dep_timestamp"] = df["FL_DATE"] + pd.to_timedelta(df["dep_minutes"], unit="m")
+    
+    # Sort by departure timestamp
+    df = df.sort_values("dep_timestamp").reset_index(drop=True)
+    
+    print(f"Dataset spans: {df['dep_timestamp'].min()} to {df['dep_timestamp'].max()}")
+    
+    # Split chronologically into train/val/test
+    n = len(df)
+    train_end = int(n * split_ratios[0])
+    val_end = int(n * (split_ratios[0] + split_ratios[1]))
+    
+    train_indices = np.arange(0, train_end)
+    val_indices = np.arange(train_end, val_end)
+    test_indices = np.arange(val_end, n)
+    
+    print(f"\nChronological split: train={len(train_indices)} ({split_ratios[0]*100:.0f}%), "
+          f"val={len(val_indices)} ({split_ratios[1]*100:.0f}%), "
+          f"test={len(test_indices)} ({split_ratios[2]*100:.0f}%)")
+    
+    # Normalize using train statistics
+    norm_stats = {"mu": {}, "sigma": {}}
+    if normalize and normalize_cols_file and os.path.isfile(normalize_cols_file):
+        try:
+            requested = split_file_to_list(normalize_cols_file)
+            num_cols = [c for c in requested if c in df.columns]
+            
+            if num_cols:
+                print(f"Normalizing {len(num_cols)} columns using train split statistics")
+                df[num_cols] = df[num_cols].astype('float32')
+                
+                # Compute stats from train portion only
+                train_slice = df.loc[train_indices, num_cols]
+                mu = train_slice.mean()
+                sigma = train_slice.std(ddof=0)
+                sigma_safe = sigma.replace({0: 1.0})
+                
+                # Apply to entire dataframe
+                df.loc[:, num_cols] = (df[num_cols] - mu) / sigma_safe
+                
+                norm_stats["mu"] = {c: float(mu[c]) for c in num_cols}
+                norm_stats["sigma"] = {c: float(sigma_safe[c]) for c in num_cols}
+                # Print all normalization statistics for visibility
+                print("Normalization complete. Per-column statistics (μ, σ):")
+                for c in num_cols:
+                    mu_val = norm_stats["mu"].get(c, "N/A")
+                    sigma_val = norm_stats["sigma"].get(c, "N/A")
+                    if isinstance(mu_val, (int, float)) and isinstance(sigma_val, (int, float)):
+                        print(f"  {c}: μ={mu_val:.4f}, σ={sigma_val:.4f}")
+                    else:
+                        print(f"  {c}: μ={mu_val}, σ={sigma_val}")
+        except Exception as e:
+            print(f"Warning: normalization failed: {e}")
+    
+    # Store split masks on dataframe
+    df["split"] = "test"  # default
+    df.loc[train_indices, "split"] = "train"
+    df.loc[val_indices, "split"] = "val"
+    
+    split_indices = {
+        'train_idx': train_indices,
+        'val_idx': val_indices,
+        'test_idx': test_indices,
+    }
+
+    return df, split_indices, norm_stats
+
+
+def load_data_sliding_windows(
     path: str,
     mode: str = "train",
     task_type: str = "regression",
@@ -22,22 +188,22 @@ def load_data(
     pred_window: int = 1,  # Length of prediction window in units
     window_stride: int = 1,  # Stride between windows in units
     normalize: bool = True,
-) -> tuple[pd.DataFrame, dict, list, dict]:
+) -> tuple[pd.DataFrame, dict, dict, dict]:
     """Load data and prepare for sliding window temporal training.
     
     Returns:
         df: Full dataframe sorted by time
+        split_indices: Dict with numpy arrays for chronological split indices
         norm_stats: Normalization statistics
         window_splits: Dict with keys 'train'/'val'/'test' -> list of window dicts
-        split_indices: Dict with numpy arrays for chronological split indices: {"train_idx","val_idx","test_idx"}
     """
     
-    df = pd.read_csv(path)
-
-    # Optional row cap for quicker testing
     if max_rows and max_rows > 0:
-        df = df.head(int(max_rows)).reset_index(drop=True)
-        print(f"Row cap enabled: using first {int(max_rows)} rows.")
+        df = pd.read_csv(path, nrows=int(max_rows))
+        df = df.reset_index(drop=True)
+        print(f"Row cap enabled: reading first {int(max_rows)} rows.")
+    else:
+        df = pd.read_csv(path)
 
     # Remove cancelled flights for delay prediction
     if "CANCELLED" in df.columns:
@@ -204,4 +370,4 @@ def load_data(
         'test_idx': test_indices,
     }
 
-    return df, norm_stats, window_splits, split_indices
+    return df, split_indices, norm_stats, window_splits

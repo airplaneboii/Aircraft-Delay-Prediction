@@ -7,6 +7,7 @@ model_type: hgt
 data_path: data/datasets/
 data_split: [80, 10, 10]
 normalize: true
+use_sliding_windows: false
 
 graph_dir: pretrained/graphs/
 model_dir: pretrained/models/
@@ -18,7 +19,7 @@ compile: false
 compile_backend: inductor
 compile_mode: default
 resume: false
-epochs: 500
+epochs: 200
 lr: 0.00001
 weight_decay: 0.000001
 prediction_type: classification

@@ -27,7 +27,7 @@ def _save_checkpoint(model, optimizer, scheduler, args, epoch, model_path, logge
     logging.debug(f"Saving checkpoint for epoch {epoch+1}/{getattr(args, 'epochs', '?')}")
     try:
         ckpt = {
-            "epoch": epoch,
+            "epoch": epoch+1,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
             "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
@@ -38,7 +38,7 @@ def _save_checkpoint(model, optimizer, scheduler, args, epoch, model_path, logge
         logger.warning(f"Failed to save checkpoint for epoch {epoch+1}: {e}")
 
 
-def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler):
+def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=0, criterion=None):
     """Train using sliding windows (hetero4)."""
     print(f"\n=== Training with sliding windows: {len(window_defs)} windows per epoch ===")
 
@@ -47,7 +47,6 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
     # Store original ARR_DELAY values to restore after each window
     arr_delay_original = graph["flight"].x[:, -2].clone()
 
-    start_epoch = 0
     num_epochs = args.epochs
 
     for epoch in range(start_epoch, num_epochs):
@@ -76,23 +75,11 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
             if args.prediction_type == "regression":
                 labels = graph["flight"].y.squeeze(-1)[train_pred_mask].to(device)
                 preds = out.squeeze(-1)[train_pred_mask]
-                loss = nn.MSELoss() if args.criterion == "mse" else (nn.SmoothL1Loss() if args.criterion == "huber" else nn.L1Loss()) if args.prediction_type == "regression" else None
-                # use existing criterion defined earlier by caller; compute loss below
-                loss = None
-                try:
-                    loss = getattr(_train_windowed, "_criterion")
-                except Exception:
-                    loss = None
-                # fallback to compute directly if not set
-                if loss is None:
-                    if args.criterion == "mse":
-                        loss = nn.MSELoss()(preds, labels)
-                    elif args.criterion == "huber":
-                        loss = nn.SmoothL1Loss()(preds, labels)
-                    elif args.criterion == "l1":
-                        loss = nn.L1Loss()(preds, labels)
-                    else:
-                        loss = nn.MSELoss()(preds, labels)
+
+                if criterion is None:
+                    raise ValueError("A loss `criterion` must be provided to _train_windowed via train()")
+
+                loss = criterion(preds, labels)
 
                 # Backward and step
                 if amp_enabled:
@@ -110,7 +97,11 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
             else:
                 labels = graph["flight"].y.view(-1).float()[train_pred_mask].to(device)
                 logits = out[train_pred_mask].squeeze(-1)
-                loss = nn.BCEWithLogitsLoss()(logits, labels)
+
+                if criterion is None:
+                    raise ValueError("A loss `criterion` must be provided to _train_windowed via train()")
+
+                loss = criterion(logits, labels)
 
                 probs = torch.sigmoid(logits)
                 preds_for_metrics = (probs > args.border).long().cpu()
@@ -151,10 +142,9 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
     return
 
 
-def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler):
+def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=0, criterion=None):
     """Legacy training path (neighbor sampling or full-batch)."""
     overall_start = time.time()
-    start_epoch = 0
     num_epochs = args.epochs
 
     for epoch in range(start_epoch, num_epochs):
@@ -178,7 +168,9 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 if args.prediction_type == "regression":
                     labels = batch["flight"].y.squeeze(-1)[:flight_batch_size].to(device)
                     preds = out.squeeze(-1)[:flight_batch_size]
-                    loss = nn.MSELoss()(preds, labels) if args.criterion == "mse" else (nn.SmoothL1Loss()(preds, labels) if args.criterion == "huber" else nn.L1Loss()(preds, labels))
+                    if criterion is None:
+                        raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
+                    loss = criterion(preds, labels)
                     preds_for_metrics = preds.detach().cpu()
                 else:
                     labels_full = batch["flight"].y.view(-1).float()[:flight_batch_size].to(device)
@@ -197,7 +189,9 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
 
                     labels_os = labels_full[train_indices_os]
                     logits_os = logits_full[train_indices_os]
-                    loss = nn.BCEWithLogitsLoss()(logits_os, labels_os)
+                    if criterion is None:
+                        raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
+                    loss = criterion(logits_os, labels_os)
                     probs = torch.sigmoid(logits_full)
                     preds_for_metrics = (probs > args.border).long().cpu()
 
@@ -231,7 +225,9 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
 
                 labels = graph["flight"].y.squeeze(-1)[mask].to(device)
                 preds = out.squeeze(-1)[mask]
-                loss = nn.MSELoss()(preds, labels) if args.criterion == "mse" else (nn.SmoothL1Loss()(preds, labels) if args.criterion == "huber" else nn.L1Loss()(preds, labels))
+                if criterion is None:
+                    raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
+                loss = criterion(preds, labels)
                 preds_for_metrics = preds.detach().cpu()
 
                 if amp_enabled:
@@ -250,7 +246,9 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 mask = graph["flight"].train_mask
                 labels = graph["flight"].y.view(-1).float()[mask].to(device)
                 logits = out[mask].squeeze(-1)
-                loss = nn.BCEWithLogitsLoss()(logits, labels)
+                if criterion is None:
+                    raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
+                loss = criterion(logits, labels)
                 probs = torch.sigmoid(logits)
                 preds_for_metrics = (probs > args.border).long().cpu()
 
@@ -405,9 +403,9 @@ def train(
 
     # Hetero4 sliding window training: delegate to helper
     if window_defs is not None:
-        _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler)
+        _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=start_epoch, criterion=criterion)
         return
     
     # Legacy training: delegate to helper
-    _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler)
+    _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=start_epoch, criterion=criterion)
     return

@@ -141,7 +141,7 @@ def main():
 
     if graph is None:
         print(f"Loading data...")
-        df, norm_stats, loaded_windows, loaded_split_indices = load_data(
+        df, split_indices, norm_stats, loaded_windows = load_data(
             args.data_path,
             mode=args.mode,
             task_type=args.prediction_type,
@@ -153,17 +153,18 @@ def main():
             pred_window=getattr(args, "pred_window", 1),
             window_stride=getattr(args, "window_stride", 1),
             normalize=getattr(args, "normalize", True),
+            use_sliding_windows=getattr(args, "use_sliding_windows", False),
         )
-        # Only set window_splits if not already restored from graph
-        if window_splits is None:
+        # Only set window_splits if not already restored from graph and if loader provided windows
+        if window_splits is None and loaded_windows is not None:
             window_splits = loaded_windows
         setattr(args, "norm_stats", norm_stats)
 
     if graph is None and df is not None:
         # Get split indices (loader now returns chronological split index arrays)
-        train_idx = loaded_split_indices['train_idx']
-        val_idx = loaded_split_indices['val_idx']
-        test_idx = loaded_split_indices['test_idx']
+        train_idx = split_indices['train_idx']
+        val_idx = split_indices['val_idx']
+        test_idx = split_indices['test_idx']
 
         first_graph = build_graph(args, df, train_idx, val_idx, test_idx, norm_stats)
         print_graph_stats(first_graph)
