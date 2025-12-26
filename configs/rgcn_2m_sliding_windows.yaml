@@ -27,7 +27,7 @@ window_stride: 1  # Slide by 1 unit (1 hour)
 # Graph
 # ========================================
 graph_type: hetero4
-save_graph: hetero4_2M
+save_graph: 
 load_graph: hetero4_2M
 
 # ========================================
@@ -36,10 +36,9 @@ load_graph: hetero4_2M
 model_type: rgcn
 prediction_type: regression
 model_file: "rgcn_hetero4_2m_sliding"
-# Model architecture defaults from code:
-# hidden_channels: 64
-# num_layers: 2
-# dropout: 0.2
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 
 # ========================================
 # Training
@@ -53,7 +52,7 @@ criterion: huber  # huber loss for regression (robust to outliers)
 # ========================================
 # Performance
 # ========================================
-amp: false  # disabled for stability
+amp: true  # disabled for stability
 compile: false  # PyTorch 2.x compilation disabled
 neighbor_sampling: false  # full-batch training
 

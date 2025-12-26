@@ -23,8 +23,10 @@ load_graph: hetero3_graph
 model_type: rgcn
 prediction_type: regression
 model_file: hetero3_rgcn_reg
-border: 0.6
-
+border: 0.45
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 # Training
 epochs: 200
 lr: 1e-05

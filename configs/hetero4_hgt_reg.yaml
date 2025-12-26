@@ -24,7 +24,9 @@ model_type: hgt
 prediction_type: regression
 model_file: hetero4_hgt_reg
 border: 0.6
-
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 # Training
 epochs: 50
 lr: 1e-03

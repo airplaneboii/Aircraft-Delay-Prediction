@@ -27,6 +27,10 @@ model_type: rgcn
 prediction_type: regression
 model_file: null
 border: 0.45
+# Model hyperparameters (overridable)
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 
 # Training
 epochs: 200

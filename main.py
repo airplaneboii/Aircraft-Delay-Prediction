@@ -41,18 +41,23 @@ def build_graph(args, dataframe, train_idx, val_idx, test_idx, norm_stats):
 def build_model(args, metadata, in_channels_dict):
     out_channels = 1
     mt = args.model_type
+    # Hyperparameters from args (config overrides via YAML are applied in get_args())
+    hc = getattr(args, "hidden_channels", 64)
+    nl = getattr(args, "num_layers", 2)
+    do = getattr(args, "dropout", 0.2)
+
     if mt == "none":
         return None
     if mt == "dummy":
-        return DummyModel(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=64, out_channels=out_channels).to(args.device)
+        return DummyModel(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels).to(args.device)
     if mt == "heterosage":
-        return HeteroSAGE(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=64, out_channels=out_channels, num_layers=2, dropout=0.2).to(args.device)
+        return HeteroSAGE(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, dropout=do).to(args.device)
     if mt == "rgcn":
-        return RGCN(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=64, out_channels=out_channels, num_layers=2, dropout=0.2).to(args.device)
+        return RGCN(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, dropout=do).to(args.device)
     if mt == "leakyrgcn":
-        return LeakyRGCN(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=128, out_channels=out_channels, num_layers=2, dropout=0.2).to(args.device)
+        return LeakyRGCN(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, dropout=do).to(args.device)
     if mt == "hgt":
-        return HGT(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=64, out_channels=out_channels, num_layers=2, num_heads=2, dropout=0.2).to(args.device)
+        return HGT(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, num_heads=2, dropout=do).to(args.device)
     raise ValueError("Unsupported model type.")
 
 

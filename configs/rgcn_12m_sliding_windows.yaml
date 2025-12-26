@@ -36,10 +36,9 @@ load_graph: hetero4_12M
 model_type: rgcn
 prediction_type: regression
 model_file: "rgcn_hetero4_12m_sliding"
-# Model architecture defaults from code:
-# hidden_channels: 64
-# num_layers: 2
-# dropout: 0.2
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 
 # ========================================
 # Training

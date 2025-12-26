@@ -27,4 +27,7 @@ batch_size: 800000
 neighbor_sampling: true
 neighbor_fanouts: "15,10"
 border: 0.6
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 verbosity: 1

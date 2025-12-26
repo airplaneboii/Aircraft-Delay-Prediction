@@ -80,9 +80,10 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
 
 def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
     """Evaluate on sliding windows."""
-    # Store original ARR_DELAY if masking is needed (for hetero4)
-    if "ARR_DELAY" in [col for col in range(graph["flight"].x.size(1))]:
-        arr_idx = getattr(graph["flight"], "feat_index", {}).get("arr_delay", -2)
+    # Store original ARR_DELAY if available (use feat_index mapping)
+    feat_map = getattr(graph["flight"], "feat_index", None)
+    if feat_map is not None and "arr_delay" in feat_map:
+        arr_idx = feat_map["arr_delay"]
         arr_delay_original = graph["flight"].x[:, arr_idx].clone()
     else:
         arr_delay_original = None
@@ -124,7 +125,8 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
                     all_window_labels.append(labels.detach().cpu())
                     all_window_preds.append(preds.detach().cpu())
                 else:
-                    labels = get_labels(graph, "classification", eval_mask)
+                    # Use prediction-window mask for labels so lengths match preds
+                    labels = get_labels(graph, "classification", eval_pred_mask)
                     logits = out[eval_pred_mask]
                     probs = torch.sigmoid(logits)
                     preds = (probs >= args.border).long()
@@ -140,6 +142,16 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
     preds_cat = torch.cat(all_window_preds) if all_window_preds else torch.tensor([])
     
     from src.utils import compute_epoch_stats
+    # Sanity check: labels and preds should have same length
+    if labels_cat.numel() != preds_cat.numel():
+        logger.warning("Mismatch between labels and preds: %d vs %d; trimming to minimum for metrics", labels_cat.numel(), preds_cat.numel())
+        mn = min(labels_cat.numel(), preds_cat.numel())
+        if mn == 0:
+            logger.warning("No labels or predictions to evaluate. Skipping metrics for this run.")
+            return
+        labels_cat = labels_cat[:mn]
+        preds_cat = preds_cat[:mn]
+
     compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
 
 

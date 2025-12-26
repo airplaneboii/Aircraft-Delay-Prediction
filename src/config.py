@@ -33,6 +33,11 @@ DEFAULT_MODEL_TYPE = "rgcn"
 DEFAULT_MODEL_FILENAME = None
 DEFAULT_PREDICTION_TYPE = "regression"
 
+# Model hyperparameters (configurable)
+DEFAULT_HIDDEN_CHANNELS = 64
+DEFAULT_NUM_LAYERS = 2
+DEFAULT_DROPOUT = 0.2
+
 # --- Training ---
 DEFAULT_EPOCHS = 500
 DEFAULT_LR = 1e-3
@@ -158,6 +163,13 @@ def get_args():
                         help=f"Type of prediction task (default: {DEFAULT_PREDICTION_TYPE})")
     parser.add_argument("--border", type=float, default=DEFAULT_CLASS_BORDER,
                         help=f"Border value for classification tasks (default: {DEFAULT_CLASS_BORDER})")
+    # Model hyperparameters
+    parser.add_argument("--hidden_channels", type=int, default=DEFAULT_HIDDEN_CHANNELS,
+                        help=f"Hidden channel size for GNNs (default: {DEFAULT_HIDDEN_CHANNELS})")
+    parser.add_argument("--num_layers", type=int, default=DEFAULT_NUM_LAYERS,
+                        help=f"Number of GNN layers (default: {DEFAULT_NUM_LAYERS})")
+    parser.add_argument("--dropout", type=float, default=DEFAULT_DROPOUT,
+                        help=f"Dropout probability (default: {DEFAULT_DROPOUT})")
 
     # ========================================
     # Training

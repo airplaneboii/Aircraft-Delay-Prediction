@@ -24,6 +24,9 @@ model_type: rgcn
 prediction_type: classification
 model_file: hetero3_rgcn_cls
 border: 0.6
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
 
 # Training
 epochs: 200

@@ -3,7 +3,7 @@ import torch
 import time
 from datetime import datetime
 from torch import nn, optim
-from src.utils import compute_epoch_stats, resolve_fanouts, get_labels
+from src.utils import compute_epoch_stats, resolve_fanouts, get_labels, move_graph_to_device
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.data import HeteroData
 import logging
@@ -398,15 +398,88 @@ def train(
     amp_enabled = bool(getattr(args, "amp", False)) and (device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda") if amp_enabled else None
 
+    # If AMP is enabled, patch PyG segment_matmul to compute in float32 when inputs are float16
+    if amp_enabled:
+        try:
+            import pyg_lib.ops as pyg_ops
+            _orig_segment_matmul = getattr(pyg_ops, 'segment_matmul', None)
+            if _orig_segment_matmul is not None:
+                def _safe_segment_matmul(inputs, ptr, other):
+                    # If either input is float16, perform matmul in float32 and cast back
+                    try:
+                        if inputs.dtype == torch.float16 or other.dtype == torch.float16:
+                            inputs32 = inputs.to(torch.float32)
+                            other32 = other.to(torch.float32)
+                            out = _orig_segment_matmul(inputs32, ptr, other32)
+                            return out.to(inputs.dtype)
+                        else:
+                            return _orig_segment_matmul(inputs, ptr, other)
+                    except Exception:
+                        # On any failure, fallback to original op to raise native errors
+                        return _orig_segment_matmul(inputs, ptr, other)
+                pyg_ops.segment_matmul = _safe_segment_matmul
+                logging.getLogger("train").info("Patched pyg_lib.ops.segment_matmul to use float32 compute when inputs are float16 (AMP compatibility).")
+        except Exception as e:
+            logging.getLogger("train").warning(f"Failed to patch pyg segment_matmul for AMP: {e}")
+
     # Optional: compile the model for speed (PyTorch 2.x)
     if bool(getattr(args, "compile", False)):
         backend = getattr(args, "compile_backend", "inductor")
         mode = getattr(args, "compile_mode", "default")
+        compile_attempted = False
+
+        # If using inductor backend, ensure Triton is available (it's required by inductor).
+        # If Triton is missing, or MSVC isn't available on Windows, fall back to aot_eager.
+        selected_backend = backend
+        if backend == "inductor":
+            try:
+                # Some Triton packages (especially on Windows) may not expose the
+                # symbols needed by torch-inductor. Probe for the expected API.
+                from triton.compiler.compiler import triton_key  # type: ignore
+                import triton  # type: ignore
+                triton_ver = getattr(triton, "__version__", "unknown")
+                logger.info(f"Found Triton (version={triton_ver}), proceeding with inductor backend")
+            except Exception as e:
+                logger.warning(
+                    "Triton is present but incompatible (or missing required symbols): %s; "
+                    "falling back from 'inductor' to 'aot_eager' backend. "
+                    "If you want to use inductor, install a Triton build compatible with your PyTorch version (see: https://github.com/openai/triton)",
+                    e,
+                )
+                selected_backend = "aot_eager"
+            else:
+                # On Windows, torch-inductor requires MSVC (cl.exe) to JIT-compile
+                # CPU-side kernels; if cl is not on PATH, fallback to aot_eager.
+                try:
+                    import shutil, platform
+                    if platform.system() == "Windows":
+                        if shutil.which("cl") is None:
+                            logger.warning(
+                                "MSVC cl.exe not found on PATH; falling back from 'inductor' to 'aot_eager' backend. "
+                                "Install Visual Studio Build Tools (with C++ build tools) or run from a Developer Command Prompt to enable inductor on Windows.")
+                            selected_backend = "aot_eager"
+                except Exception:
+                    # Defensive: if anything goes wrong in the probe, continue and let
+                    # torch.compile surface errors (we'll handle its exceptions below).
+                    logger.debug("Failed to probe MSVC availability; proceeding and letting torch.compile handle missing compiler errors.")
+
         try:
-            model = torch.compile(model, backend=backend, mode=mode)
-            logger.info(f"Model compiled with backend={backend}, mode={mode}")
+            # Ensure scalar outputs (e.g., Tensor.item()) are captured when compiling
+            try:
+                import torch._dynamo as _dynamo
+                _dynamo.config.capture_scalar_outputs = True
+                logger.info("Enabled torch._dynamo.config.capture_scalar_outputs=True to include scalar outputs in captured graphs")
+            except Exception:
+                logger.debug("torch._dynamo not available or config couldn't be set")
+
+            model = torch.compile(model, backend=selected_backend, mode=mode)
+            logger.info(f"Model compiled with backend={selected_backend}, mode={mode}")
+            compile_attempted = True
         except Exception as e:
-            logger.warning(f"torch.compile failed (backend={backend}, mode={mode}): {e}")
+            logger.warning(f"torch.compile failed (backend={selected_backend}, mode={mode}): {e}")
+
+        if not compile_attempted:
+            logger.info("Continuing without torch.compile (performance will be unoptimized)")
 
     # Hetero4 sliding window training: delegate to helper
     if window_defs is not None:
