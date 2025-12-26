@@ -53,7 +53,13 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
     num_epochs = args.epochs
 
     # Reusable iterative builder for subgraphs across windows
-    builder = WindowSubgraphBuilder(graph)
+    builder = WindowSubgraphBuilder(
+        graph,
+        unit=getattr(args, "unit", None),
+        learn_window=getattr(args, "learn_window", None),
+        pred_window=getattr(args, "pred_window", None),
+        window_stride=getattr(args, "window_stride", None),
+    )
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -69,7 +75,10 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
             # Build induced subgraph for this window (includes only window flights + connected nodes)
             # Iterative approach: reuse the builder across windows
             subgraph, local_pred_mask = builder.build_subgraph(
-                learn_indices, pred_indices, device=device
+                learn_indices,
+                pred_indices,
+                device=device,
+                window_time_range=window_info.get("time_range"),
             )
             
             # Mask ARR_DELAY in the subgraph for prediction window only

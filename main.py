@@ -268,6 +268,10 @@ def main():
         else:
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
+        # Get windows for the appropriate split and prepare defs FIRST (used to decide device move)
+        raw_eval_windows = window_splits.get(args.mode, []) if isinstance(window_splits, dict) else []
+        eval_window_defs = prepare_window_defs(raw_eval_windows, n_nodes)
+
         # Use the graph we already built
         if first_graph is not None:
             graph = first_graph
@@ -279,10 +283,7 @@ def main():
                 graph = move_graph_to_device(graph, device)
         else:
             raise RuntimeError("No graph available for evaluation")
-        
-        # Get windows for the appropriate split and prepare defs
-        raw_eval_windows = window_splits.get(args.mode, []) if isinstance(window_splits, dict) else []
-        eval_window_defs = prepare_window_defs(raw_eval_windows, n_nodes)
+
 
         if not eval_window_defs:
             # No windows, evaluate on full split

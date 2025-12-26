@@ -28,7 +28,7 @@ window_stride: 1  # Slide by 1 unit (1 hour)
 # ========================================
 graph_type: hetero4
 save_graph: hetero4_2M
-load_graph: 
+load_graph: hetero4_2M
 
 # ========================================
 # Model

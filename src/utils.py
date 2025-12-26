@@ -460,12 +460,16 @@ class WindowSubgraphBuilder:
     consecutive windows reuse overlapping data to minimize rebuilding.
     """
     
-    def __init__(self, graph):
+    def __init__(self, graph, unit: int | None = None, learn_window: int | None = None, pred_window: int | None = None, window_stride: int | None = None):
         """
         Initialize the builder with the full graph.
         
         Args:
             graph: Full HeteroData graph
+            unit: Time unit size in minutes (optional, enables per-unit caching)
+            learn_window: learn window length in units (optional)
+            pred_window: pred window length in units (optional)
+            window_stride: stride in units (optional)
         """
         self.graph = graph
         self.graph_device = graph["flight"].x.device
@@ -476,8 +480,71 @@ class WindowSubgraphBuilder:
         for etype in graph.edge_types:
             self.edge_index_cpu[etype] = graph[etype].edge_index.cpu()
         self.num_flights = graph["flight"].x.size(0)
+
+        # Optional per-unit cache for faster window assembly
+        self.unit = unit
+        self.learn_window = learn_window
+        self.pred_window = pred_window
+        self.window_stride = window_stride
+        self.flights_by_unit = None
+        if unit is not None and hasattr(graph["flight"], "timestamp_min"):
+            try:
+                timestamps_min = graph["flight"].timestamp_min.cpu().numpy()
+                time_units = (timestamps_min // unit).astype(int)
+                min_u = time_units.min()
+                max_u = time_units.max()
+                buckets = [[] for _ in range(max_u - min_u + 1)]
+                for idx, tu in enumerate(time_units):
+                    buckets[tu - min_u].append(idx)
+                self.flights_by_unit = {
+                    (min_u + offset): torch.tensor(arr, dtype=torch.long) if len(arr) > 0 else torch.tensor([], dtype=torch.long)
+                    for offset, arr in enumerate(buckets)
+                }
+                self.unit_min = min_u
+            except Exception:
+                self.flights_by_unit = None
+
+        # Build CSR-like adjacency to access neighbors per flight in O(1) ranges
+        # For edge types where src=='flight': map flight -> neighbor nodes of dst_type
+        # For edge types where dst=='flight': map flight -> neighbor nodes of src_type
+        self.csr_src = {}  # dst_type -> {ptr, col}
+        self.csr_dst = {}  # src_type -> {ptr, col}
+        def _build_csr(rows: torch.Tensor, cols: torch.Tensor, n_rows: int):
+            # Sort by row
+            order = torch.argsort(rows, stable=True)
+            rows_sorted = rows[order]
+            cols_sorted = cols[order]
+            counts = torch.bincount(rows_sorted, minlength=n_rows)
+            ptr = torch.empty(n_rows + 1, dtype=torch.long)
+            ptr[0] = 0
+            torch.cumsum(counts, dim=0, out=ptr[1:])
+            return ptr, cols_sorted
+        for et in graph.edge_types:
+            s, _, d = et
+            ei = self.edge_index_cpu[et]
+            if s == 'flight':
+                ptr, col = _build_csr(ei[0], ei[1], self.num_flights)
+                self.csr_src.setdefault(d, {})['ptr'] = ptr
+                self.csr_src[d]['col'] = col
+            if d == 'flight':
+                ptr, col = _build_csr(ei[1], ei[0], self.num_flights)
+                self.csr_dst.setdefault(s, {})['ptr'] = ptr
+                self.csr_dst[s]['col'] = col
+
+        # Node refcounts for non-flight node types (used in rolling updates)
+        self.node_refcounts = {}
+        for ntype in graph.node_types:
+            if ntype == 'flight':
+                continue
+            n_nodes = getattr(graph[ntype], 'num_nodes', None)
+            x = getattr(graph[ntype], 'x', None)
+            if n_nodes is None and isinstance(x, torch.Tensor):
+                n_nodes = x.size(0)
+            if n_nodes is None:
+                continue
+            self.node_refcounts[ntype] = torch.zeros(n_nodes, dtype=torch.int32)
         
-    def build_subgraph(self, learn_indices, pred_indices, device=None):
+    def build_subgraph(self, learn_indices, pred_indices, device=None, window_time_range=None):
         """
         Build an induced subgraph for a sliding window.
         
@@ -500,52 +567,93 @@ class WindowSubgraphBuilder:
         from torch_geometric.data import HeteroData
         
         # Combine learn and pred indices for the full window (CPU, sorted, unique)
-        window_flights = np.unique(np.concatenate([learn_indices, pred_indices]))
-        window_flights_tensor = torch.from_numpy(window_flights).long().cpu()
-        window_flights_tensor = torch.unique(window_flights_tensor, sorted=True)
-        
-        # Start building node selections
+        if window_time_range is not None and self.flights_by_unit is not None:
+            start_u, end_u = window_time_range  # inclusive end
+            # Collect flights from cached per-unit buckets
+            flights_list = []
+            for u in range(start_u, end_u + 1):
+                bucket = self.flights_by_unit.get(u, None)
+                if bucket is not None and bucket.numel() > 0:
+                    flights_list.append(bucket)
+            if flights_list:
+                window_flights_tensor = torch.unique(torch.cat(flights_list), sorted=True)
+            else:
+                window_flights_tensor = torch.tensor([], dtype=torch.long)
+        else:
+            window_flights = np.unique(np.concatenate([learn_indices, pred_indices]))
+            window_flights_tensor = torch.from_numpy(window_flights).long().cpu()
+            window_flights_tensor = torch.unique(window_flights_tensor, sorted=True)
+
+        # Rolling update using CSR and refcounts if we have per-unit windows
         node_selections = {}
         node_selections['flight'] = window_flights_tensor
-        # Flight mask for quick edge filtering (CPU)
-        flight_mask = torch.zeros(self.num_flights, dtype=torch.bool)
-        flight_mask[window_flights_tensor] = True
-        
-        # Iterate over ALL edge types and extract connected nodes
-        for edge_type in self.graph.edge_types:
-            src_type, rel_name, dst_type = edge_type
-            edge_index = self.edge_index_cpu[edge_type]
-            
-            # If flights are the source, find connected destinations
-            if src_type == 'flight':
-                ei0 = edge_index[0]
-                ei1 = edge_index[1]
-                mask = flight_mask[ei0]
-                if mask.any():
-                    connected_nodes = ei1[mask].unique()
-                    if dst_type in node_selections:
-                        # Merge with existing selections
-                        node_selections[dst_type] = torch.cat([
-                            node_selections[dst_type], 
-                            connected_nodes
-                        ]).unique()
-                    else:
-                        node_selections[dst_type] = connected_nodes
-            
-            # If flights are the destination, find connected sources  
-            if dst_type == 'flight':
-                ei0 = edge_index[0]
-                ei1 = edge_index[1]
-                mask = flight_mask[ei1]
-                if mask.any():
-                    connected_nodes = ei0[mask].unique()
-                    if src_type in node_selections:
-                        node_selections[src_type] = torch.cat([
-                            node_selections[src_type],
-                            connected_nodes
-                        ]).unique()
-                    else:
-                        node_selections[src_type] = connected_nodes
+
+        if window_time_range is not None and self.flights_by_unit is not None:
+            # Determine added/removed flights vs last window
+            if self.last_window_flights is None:
+                added = window_flights_tensor
+                removed = torch.tensor([], dtype=torch.long)
+            else:
+                old = self.last_window_flights
+                added = torch.unique(window_flights_tensor[~torch.isin(window_flights_tensor, old)], sorted=True)
+                removed = torch.unique(old[~torch.isin(old, window_flights_tensor)], sorted=True)
+
+            # Update refcounts for neighbors per added/removed flights
+            def _update_counts(flights: torch.Tensor, delta: int):
+                if flights.numel() == 0:
+                    return
+                # flight -> dst_type neighbors
+                for dst_type, csr in self.csr_src.items():
+                    ptr, col = csr['ptr'], csr['col']
+                    # Collect neighbors for all flights
+                    neigh = []
+                    for f in flights.tolist():
+                        s, e = int(ptr[f].item()), int(ptr[f+1].item())
+                        if e > s:
+                            neigh.append(col[s:e])
+                    if neigh:
+                        ncat = torch.unique(torch.cat(neigh))
+                        self.node_refcounts[dst_type].index_add_(0, ncat, torch.full((ncat.numel(),), delta, dtype=torch.int32))
+                # src_type -> flight neighbors
+                for src_type, csr in self.csr_dst.items():
+                    ptr, col = csr['ptr'], csr['col']
+                    neigh = []
+                    for f in flights.tolist():
+                        s, e = int(ptr[f].item()), int(ptr[f+1].item())
+                        if e > s:
+                            neigh.append(col[s:e])
+                    if neigh:
+                        ncat = torch.unique(torch.cat(neigh))
+                        self.node_refcounts[src_type].index_add_(0, ncat, torch.full((ncat.numel(),), delta, dtype=torch.int32))
+
+            _update_counts(added, +1)
+            _update_counts(removed, -1)
+
+            # Build node selections from positive refcounts
+            for ntype, counts in self.node_refcounts.items():
+                sel = torch.nonzero(counts > 0, as_tuple=False).view(-1)
+                node_selections[ntype] = sel
+        else:
+            # Fallback: compute neighbors fresh via masking (still efficient using flight_mask)
+            flight_mask = torch.zeros(self.num_flights, dtype=torch.bool)
+            flight_mask[window_flights_tensor] = True
+            for edge_type in self.graph.edge_types:
+                src_type, rel_name, dst_type = edge_type
+                edge_index = self.edge_index_cpu[edge_type]
+                if src_type == 'flight':
+                    ei0, ei1 = edge_index[0], edge_index[1]
+                    connected = torch.unique(ei1[flight_mask[ei0]])
+                    if connected.numel() > 0:
+                        node_selections[dst_type] = torch.unique(torch.cat([
+                            node_selections.get(dst_type, torch.tensor([], dtype=torch.long)), connected
+                        ]))
+                if dst_type == 'flight':
+                    ei0, ei1 = edge_index[0], edge_index[1]
+                    connected = torch.unique(ei0[flight_mask[ei1]])
+                    if connected.numel() > 0:
+                        node_selections[src_type] = torch.unique(torch.cat([
+                            node_selections.get(src_type, torch.tensor([], dtype=torch.long)), connected
+                        ]))
         
         # Build induced subgraph using PyG's subgraph method
         # HeteroData.subgraph expects CPU LongTensor indices; ensure sorted for stable ordering
@@ -564,7 +672,7 @@ class WindowSubgraphBuilder:
             subgraph = subgraph.to(device)
             local_pred_mask = local_pred_mask.to(device)
         
-        # Store for potential reuse (future optimization)
+        # Store for reuse on next window
         self.last_window_flights = window_flights_tensor
         self.last_subgraph_data = node_selections
         
