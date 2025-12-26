@@ -471,6 +471,11 @@ class WindowSubgraphBuilder:
         self.graph_device = graph["flight"].x.device
         self.last_window_flights = None
         self.last_subgraph_data = None
+        # Cache CPU edge indices for faster masking without torch.isin
+        self.edge_index_cpu = {}
+        for etype in graph.edge_types:
+            self.edge_index_cpu[etype] = graph[etype].edge_index.cpu()
+        self.num_flights = graph["flight"].x.size(0)
         
     def build_subgraph(self, learn_indices, pred_indices, device=None):
         """
@@ -502,18 +507,20 @@ class WindowSubgraphBuilder:
         # Start building node selections
         node_selections = {}
         node_selections['flight'] = window_flights_tensor
+        # Flight mask for quick edge filtering (CPU)
+        flight_mask = torch.zeros(self.num_flights, dtype=torch.bool)
+        flight_mask[window_flights_tensor] = True
         
         # Iterate over ALL edge types and extract connected nodes
         for edge_type in self.graph.edge_types:
             src_type, rel_name, dst_type = edge_type
-            edge_index = self.graph[edge_type].edge_index
+            edge_index = self.edge_index_cpu[edge_type]
             
             # If flights are the source, find connected destinations
             if src_type == 'flight':
-                # Ensure edge_index on CPU for indexing operations
-                ei0 = edge_index[0].cpu()
-                ei1 = edge_index[1].cpu()
-                mask = torch.isin(ei0, window_flights_tensor)
+                ei0 = edge_index[0]
+                ei1 = edge_index[1]
+                mask = flight_mask[ei0]
                 if mask.any():
                     connected_nodes = ei1[mask].unique()
                     if dst_type in node_selections:
@@ -527,9 +534,9 @@ class WindowSubgraphBuilder:
             
             # If flights are the destination, find connected sources  
             if dst_type == 'flight':
-                ei0 = edge_index[0].cpu()
-                ei1 = edge_index[1].cpu()
-                mask = torch.isin(ei1, window_flights_tensor)
+                ei0 = edge_index[0]
+                ei1 = edge_index[1]
+                mask = flight_mask[ei1]
                 if mask.any():
                     connected_nodes = ei0[mask].unique()
                     if src_type in node_selections:
