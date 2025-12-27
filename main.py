@@ -239,9 +239,16 @@ def main():
         window_defs = prepare_window_defs(raw_train_windows, n_nodes)
 
         working_graph = first_graph
-        # When using sliding windows, keep full graph on CPU and move only subgraphs to device
-        if not use_neighbor_sampling and not window_defs:
-            working_graph = move_graph_to_device(working_graph, device)
+        # When using sliding windows with GPU, keep graph on GPU for zero-copy subgraph building
+        # Otherwise keep on CPU and move only subgraphs to device
+        if not use_neighbor_sampling:
+            if window_defs and device.type == 'cuda':
+                # GPU-resident mode: keep full graph on GPU
+                working_graph = move_graph_to_device(working_graph, device)
+                print("GPU-resident windowing: graph kept on GPU for zero-copy subgraph building")
+            elif not window_defs:
+                # No windows: move to device
+                working_graph = move_graph_to_device(working_graph, device)
 
         if not window_defs:
             # No sliding windows, train on full graph

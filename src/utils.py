@@ -18,6 +18,14 @@ except Exception:
     psutil = None
 
 
+def ensure_dir(
+        directory: str
+        ) -> None:
+    
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+
 ###################### SETUP LOGGING ######################
 def setup_logging(verbosity: int = 0, logfile: Optional[str] = None) -> logging.Logger:
     """Configure root logger for the application.
@@ -41,12 +49,46 @@ def setup_logging(verbosity: int = 0, logfile: Optional[str] = None) -> logging.
     return logging.getLogger("train")
 
 
-def ensure_dir(
-        directory: str
-        ) -> None:
-    
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+################ To work on GPU if available ##################
+def move_graph_to_device(graph, device):
+    """Move all tensor attributes of a HeteroData graph to the target device."""
+    for node_type in graph.node_types:
+        for key, val in graph[node_type].items():
+            if torch.is_tensor(val):
+                graph[node_type][key] = val.to(device)
+    for edge_type in graph.edge_types:
+        for key, val in graph[edge_type].items():
+            if torch.is_tensor(val):
+                graph[edge_type][key] = val.to(device)
+    return graph
+
+###################### GRAPH TOOLS #############################
+def hhmm_to_minutes(hhmm):
+    """Convert HHMM integer/str to minutes since midnight; safe for NaNs."""
+    if pd.isna(hhmm):
+        return 0
+    try:
+        hhmm_int = int(hhmm)
+    except Exception:
+        return 0
+    hours = hhmm_int // 100
+    minutes = hhmm_int % 100
+    return hours * 60 + minutes
+
+################ NORMALIZATION ####################
+def normalize_with_idx(arr, fit_idx):
+    """Normalize array with mean/std fitted on fit_idx rows; returns (normalized, mean, std_safe)."""
+    arr = np.asarray(arr, dtype=np.float32)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    fit_idx = np.asarray(fit_idx, dtype=int)
+    if fit_idx.size == 0:
+        fit_idx = np.arange(arr.shape[0], dtype=int)
+    mu = arr[fit_idx].mean(axis=0, keepdims=True)
+    std = arr[fit_idx].std(axis=0, keepdims=True)
+    std = np.where(std == 0, 1.0, std)
+    std_safe = std + 1e-6
+    normalized = (arr - mu) / std_safe
+    return normalized, mu, std_safe
 
 
 ###################### EVALUATION METRICS ######################
@@ -107,9 +149,7 @@ def classification_metrics(
         "Precision": precision
     }
 
-###############################
-# To work on GPU if available #
-###############################
+####################### SYSTEM STATS ##########################
 def get_available_gpu_memory():
     """Get available GPU VRAM in MB. Returns None if CUDA not available."""
     if torch.cuda.is_available():
@@ -152,47 +192,6 @@ def print_available_memory():
     else:
         print(f"  System RAM: Unable to query")
 
-
-def move_graph_to_device(graph, device):
-    """Move all tensor attributes of a HeteroData graph to the target device."""
-    for node_type in graph.node_types:
-        for key, val in graph[node_type].items():
-            if torch.is_tensor(val):
-                graph[node_type][key] = val.to(device)
-    for edge_type in graph.edge_types:
-        for key, val in graph[edge_type].items():
-            if torch.is_tensor(val):
-                graph[edge_type][key] = val.to(device)
-    return graph
-
-
-################ NORMALIZATION ####################
-def normalize_with_idx(arr, fit_idx):
-    """Normalize array with mean/std fitted on fit_idx rows; returns (normalized, mean, std_safe)."""
-    arr = np.asarray(arr, dtype=np.float32)
-    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-    fit_idx = np.asarray(fit_idx, dtype=int)
-    if fit_idx.size == 0:
-        fit_idx = np.arange(arr.shape[0], dtype=int)
-    mu = arr[fit_idx].mean(axis=0, keepdims=True)
-    std = arr[fit_idx].std(axis=0, keepdims=True)
-    std = np.where(std == 0, 1.0, std)
-    std_safe = std + 1e-6
-    normalized = (arr - mu) / std_safe
-    return normalized, mu, std_safe
-
-
-def hhmm_to_minutes(hhmm):
-    """Convert HHMM integer/str to minutes since midnight; safe for NaNs."""
-    if pd.isna(hhmm):
-        return 0
-    try:
-        hhmm_int = int(hhmm)
-    except Exception:
-        return 0
-    hours = hhmm_int // 100
-    minutes = hhmm_int % 100
-    return hours * 60 + minutes
 
 ################ TRAINING/VALIDATION/TESTING STATS ####################
 def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses, epoch_start_time, logger):
@@ -449,252 +448,4 @@ def get_labels(data, prediction_type: str, mask=None):
         if mask is not None:
             return outf[mask]
         return outf
-
-
-class WindowSubgraphBuilder:
-    """
-    Iterative builder for sliding window subgraphs that reuses computation.
     
-    This builds subgraphs containing flights in a time window plus all edges
-    between them and all connected nodes. Uses an incremental approach where
-    consecutive windows reuse overlapping data to minimize rebuilding.
-    """
-    
-    def __init__(self, graph, unit: int | None = None, learn_window: int | None = None, pred_window: int | None = None, window_stride: int | None = None):
-        """
-        Initialize the builder with the full graph.
-        
-        Args:
-            graph: Full HeteroData graph
-            unit: Time unit size in minutes (optional, enables per-unit caching)
-            learn_window: learn window length in units (optional)
-            pred_window: pred window length in units (optional)
-            window_stride: stride in units (optional)
-        """
-        self.graph = graph
-        self.graph_device = graph["flight"].x.device
-        self.last_window_flights = None
-        self.last_subgraph_data = None
-        # Cache CPU edge indices for faster masking without torch.isin
-        self.edge_index_cpu = {}
-        for etype in graph.edge_types:
-            self.edge_index_cpu[etype] = graph[etype].edge_index.cpu()
-        self.num_flights = graph["flight"].x.size(0)
-
-        # Optional per-unit cache for faster window assembly
-        self.unit = unit
-        self.learn_window = learn_window
-        self.pred_window = pred_window
-        self.window_stride = window_stride
-        self.flights_by_unit = None
-        if unit is not None and hasattr(graph["flight"], "timestamp_min"):
-            try:
-                timestamps_min = graph["flight"].timestamp_min.cpu().numpy()
-                time_units = (timestamps_min // unit).astype(int)
-                min_u = time_units.min()
-                max_u = time_units.max()
-                buckets = [[] for _ in range(max_u - min_u + 1)]
-                for idx, tu in enumerate(time_units):
-                    buckets[tu - min_u].append(idx)
-                self.flights_by_unit = {
-                    (min_u + offset): torch.tensor(arr, dtype=torch.long) if len(arr) > 0 else torch.tensor([], dtype=torch.long)
-                    for offset, arr in enumerate(buckets)
-                }
-                self.unit_min = min_u
-            except Exception:
-                self.flights_by_unit = None
-
-        # Build CSR-like adjacency to access neighbors per flight in O(1) ranges
-        # For edge types where src=='flight': map flight -> neighbor nodes of dst_type
-        # For edge types where dst=='flight': map flight -> neighbor nodes of src_type
-        self.csr_src = {}  # dst_type -> {ptr, col}
-        self.csr_dst = {}  # src_type -> {ptr, col}
-        def _build_csr(rows: torch.Tensor, cols: torch.Tensor, n_rows: int):
-            # Sort by row
-            order = torch.argsort(rows, stable=True)
-            rows_sorted = rows[order]
-            cols_sorted = cols[order]
-            counts = torch.bincount(rows_sorted, minlength=n_rows)
-            ptr = torch.empty(n_rows + 1, dtype=torch.long)
-            ptr[0] = 0
-            torch.cumsum(counts, dim=0, out=ptr[1:])
-            return ptr, cols_sorted
-        for et in graph.edge_types:
-            s, _, d = et
-            ei = self.edge_index_cpu[et]
-            if s == 'flight':
-                ptr, col = _build_csr(ei[0], ei[1], self.num_flights)
-                self.csr_src.setdefault(d, {})['ptr'] = ptr
-                self.csr_src[d]['col'] = col
-            if d == 'flight':
-                ptr, col = _build_csr(ei[1], ei[0], self.num_flights)
-                self.csr_dst.setdefault(s, {})['ptr'] = ptr
-                self.csr_dst[s]['col'] = col
-
-        # Node refcounts for non-flight node types (used in rolling updates)
-        self.node_refcounts = {}
-        for ntype in graph.node_types:
-            if ntype == 'flight':
-                continue
-            n_nodes = getattr(graph[ntype], 'num_nodes', None)
-            x = getattr(graph[ntype], 'x', None)
-            if n_nodes is None and isinstance(x, torch.Tensor):
-                n_nodes = x.size(0)
-            if n_nodes is None:
-                continue
-            self.node_refcounts[ntype] = torch.zeros(n_nodes, dtype=torch.int32)
-        
-    def build_subgraph(self, learn_indices, pred_indices, device=None, window_time_range=None):
-        """
-        Build an induced subgraph for a sliding window.
-        
-        Extracts:
-        - Flight nodes in the window (learn + pred)
-        - All edges between these flights and ANY other node type
-        - All nodes connected to these flights via edges
-        
-        Args:
-            learn_indices: numpy array of flight indices in learning window
-            pred_indices: numpy array of flight indices in prediction window
-            device: Optional device to move subgraph to
-            
-        Returns:
-            subgraph: Induced HeteroData subgraph
-            local_pred_mask: Boolean tensor marking pred flights in subgraph ordering
-        """
-        import torch
-        import numpy as np
-        from torch_geometric.data import HeteroData
-        
-        # Combine learn and pred indices for the full window (CPU, sorted, unique)
-        if window_time_range is not None and self.flights_by_unit is not None:
-            start_u, end_u = window_time_range  # inclusive end
-            # Collect flights from cached per-unit buckets
-            flights_list = []
-            for u in range(start_u, end_u + 1):
-                bucket = self.flights_by_unit.get(u, None)
-                if bucket is not None and bucket.numel() > 0:
-                    flights_list.append(bucket)
-            if flights_list:
-                window_flights_tensor = torch.unique(torch.cat(flights_list), sorted=True)
-            else:
-                window_flights_tensor = torch.tensor([], dtype=torch.long)
-        else:
-            window_flights = np.unique(np.concatenate([learn_indices, pred_indices]))
-            window_flights_tensor = torch.from_numpy(window_flights).long().cpu()
-            window_flights_tensor = torch.unique(window_flights_tensor, sorted=True)
-
-        # Rolling update using CSR and refcounts if we have per-unit windows
-        node_selections = {}
-        node_selections['flight'] = window_flights_tensor
-
-        if window_time_range is not None and self.flights_by_unit is not None:
-            # Determine added/removed flights vs last window
-            if self.last_window_flights is None:
-                added = window_flights_tensor
-                removed = torch.tensor([], dtype=torch.long)
-            else:
-                old = self.last_window_flights
-                added = torch.unique(window_flights_tensor[~torch.isin(window_flights_tensor, old)], sorted=True)
-                removed = torch.unique(old[~torch.isin(old, window_flights_tensor)], sorted=True)
-
-            # Update refcounts for neighbors per added/removed flights
-            def _update_counts(flights: torch.Tensor, delta: int):
-                if flights.numel() == 0:
-                    return
-                # flight -> dst_type neighbors
-                for dst_type, csr in self.csr_src.items():
-                    ptr, col = csr['ptr'], csr['col']
-                    # Collect neighbors for all flights
-                    neigh = []
-                    for f in flights.tolist():
-                        s, e = int(ptr[f].item()), int(ptr[f+1].item())
-                        if e > s:
-                            neigh.append(col[s:e])
-                    if neigh:
-                        ncat = torch.unique(torch.cat(neigh))
-                        self.node_refcounts[dst_type].index_add_(0, ncat, torch.full((ncat.numel(),), delta, dtype=torch.int32))
-                # src_type -> flight neighbors
-                for src_type, csr in self.csr_dst.items():
-                    ptr, col = csr['ptr'], csr['col']
-                    neigh = []
-                    for f in flights.tolist():
-                        s, e = int(ptr[f].item()), int(ptr[f+1].item())
-                        if e > s:
-                            neigh.append(col[s:e])
-                    if neigh:
-                        ncat = torch.unique(torch.cat(neigh))
-                        self.node_refcounts[src_type].index_add_(0, ncat, torch.full((ncat.numel(),), delta, dtype=torch.int32))
-
-            _update_counts(added, +1)
-            _update_counts(removed, -1)
-
-            # Build node selections from positive refcounts
-            for ntype, counts in self.node_refcounts.items():
-                sel = torch.nonzero(counts > 0, as_tuple=False).view(-1)
-                node_selections[ntype] = sel
-        else:
-            # Fallback: compute neighbors fresh via masking (still efficient using flight_mask)
-            flight_mask = torch.zeros(self.num_flights, dtype=torch.bool)
-            flight_mask[window_flights_tensor] = True
-            for edge_type in self.graph.edge_types:
-                src_type, rel_name, dst_type = edge_type
-                edge_index = self.edge_index_cpu[edge_type]
-                if src_type == 'flight':
-                    ei0, ei1 = edge_index[0], edge_index[1]
-                    connected = torch.unique(ei1[flight_mask[ei0]])
-                    if connected.numel() > 0:
-                        node_selections[dst_type] = torch.unique(torch.cat([
-                            node_selections.get(dst_type, torch.tensor([], dtype=torch.long)), connected
-                        ]))
-                if dst_type == 'flight':
-                    ei0, ei1 = edge_index[0], edge_index[1]
-                    connected = torch.unique(ei0[flight_mask[ei1]])
-                    if connected.numel() > 0:
-                        node_selections[src_type] = torch.unique(torch.cat([
-                            node_selections.get(src_type, torch.tensor([], dtype=torch.long)), connected
-                        ]))
-        
-        # Build induced subgraph using PyG's subgraph method
-        # HeteroData.subgraph expects CPU LongTensor indices; ensure sorted for stable ordering
-        for ntype in list(node_selections.keys()):
-            node_selections[ntype] = node_selections[ntype].cpu().long()
-            node_selections[ntype] = torch.unique(node_selections[ntype], sorted=True)
-        subgraph = self.graph.subgraph(node_selections)
-        
-        # Compute local pred_mask
-        pred_indices_tensor = torch.from_numpy(pred_indices).long().cpu()
-        pred_indices_tensor = torch.unique(pred_indices_tensor, sorted=True)
-        # Mask corresponds to the order of node_selections['flight'] which we controlled
-        local_pred_mask = torch.isin(node_selections['flight'], pred_indices_tensor)
-        
-        if device is not None:
-            subgraph = subgraph.to(device)
-            local_pred_mask = local_pred_mask.to(device)
-        
-        # Store for reuse on next window
-        self.last_window_flights = window_flights_tensor
-        self.last_subgraph_data = node_selections
-        
-        return subgraph, local_pred_mask
-
-
-def build_window_subgraph(graph, learn_indices, pred_indices, device=None):
-    """
-    Build an induced subgraph for a sliding window (standalone function).
-    
-    This is a convenience wrapper around WindowSubgraphBuilder for single-use cases.
-    For iterative window processing, use WindowSubgraphBuilder directly to reuse state.
-    
-    Args:
-        graph: Full HeteroData graph
-        learn_indices: numpy array of flight indices in learning window
-        pred_indices: numpy array of flight indices in prediction window
-        device: Optional device to move subgraph to
-    
-    Returns:
-        subgraph: Induced HeteroData subgraph
-        local_pred_mask: Boolean tensor marking pred flights in subgraph ordering
-    """
-    builder = WindowSubgraphBuilder(graph)
-    return builder.build_subgraph(learn_indices, pred_indices, device)

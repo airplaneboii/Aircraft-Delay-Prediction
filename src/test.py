@@ -80,7 +80,7 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
 
 def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
     """Evaluate on sliding windows using induced subgraphs."""
-    from src.utils import build_window_subgraph
+    from src.subgraph_builder import build_window_subgraph
     
     print(f"Evaluating {len(window_defs)} windows using induced subgraphs")
     

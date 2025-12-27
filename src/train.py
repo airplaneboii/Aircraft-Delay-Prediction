@@ -40,7 +40,7 @@ def _save_checkpoint(model, optimizer, scheduler, args, epoch, model_path, logge
 
 def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=0, criterion=None):
     """Train using sliding windows with induced subgraphs (hetero4)."""
-    from src.utils import WindowSubgraphBuilder, build_window_subgraph
+    from src.subgraph_builder import WindowSubgraphBuilder, OptimizedWindowSubgraphBuilder
     
     print(f"\n=== Training with sliding windows: {len(window_defs)} windows per epoch ===")
     print(f"Using induced subgraphs to prevent message passing over non-window flights")
@@ -53,13 +53,18 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
     num_epochs = args.epochs
 
     # Reusable iterative builder for subgraphs across windows
+    # Enable GPU-resident mode if graph is already on GPU (avoids CPU<->GPU transfers)
+    use_gpu = graph["flight"].x.device.type == 'cuda'
     builder = WindowSubgraphBuilder(
         graph,
         unit=getattr(args, "unit", None),
         learn_window=getattr(args, "learn_window", None),
         pred_window=getattr(args, "pred_window", None),
         window_stride=getattr(args, "window_stride", None),
+        use_gpu_resident=use_gpu,
     )
+    if use_gpu:
+        print(f"GPU-resident mode enabled: subgraphs built directly in GPU memory")
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
