@@ -10,25 +10,26 @@ use_sliding_windows: true
 
 # Sliding Window
 unit: 60
-learn_window: 10
+learn_window: 24
 pred_window: 1
 window_stride: 1
 
 # Graph
-graph_type: hetero4
-save_graph: hetero4_graph
-load_graph: hetero4_graph
+graph_type: hetero5
+save_graph: hetero5_graph
+load_graph: hetero5_graph
 
 # Model
-model_type: rgcn
+model_type: hgt
 prediction_type: regression
-model_file: hetero4_rgcn_reg
+model_file: hetero5_hgt_reg
 border: 0.6
 hidden_channels: 64
 num_layers: 2
 dropout: 0.2
+
 # Training
-epochs: 50
+epochs: 100
 lr: 1e-03
 weight_decay: 1e-06
 batch_size: 800000

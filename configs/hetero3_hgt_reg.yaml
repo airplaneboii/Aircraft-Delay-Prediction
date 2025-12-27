@@ -6,11 +6,11 @@ rows: null
 data_path: data/datasets/
 data_split: [80, 10, 10]
 normalize: true
-use_sliding_windows: false
+use_sliding_windows: true
 
 # Sliding Window
 unit: 60
-learn_window: 10
+learn_window: 24
 pred_window: 1
 window_stride: 1
 
@@ -27,6 +27,7 @@ border: 0.45
 hidden_channels: 64
 num_layers: 2
 dropout: 0.2
+
 # Training
 epochs: 200
 lr: 1e-05

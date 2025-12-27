@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=hetero4_hgt          # Job name
+#SBATCH --job-name=hetero5          # Job name
 #SBATCH --partition=gpu               # Partition (queue)
 #SBATCH --gres=gpu                    # Request GPU
 #SBATCH --nodes=1                     # Number of nodes
 #SBATCH --ntasks=1                    # Number of tasks
 #SBATCH --cpus-per-task=8             # CPU cores per task
 #SBATCH --mem=64G                     # Memory
-#SBATCH --time=24:00:00               # Walltime
+#SBATCH --time=2-00:00:00               # Walltime
 #SBATCH --output="logs/%x_%j.log"       # Stdout
 #SBATCH --error="logs/%x_%j.log"        # Stderr
 
@@ -65,10 +65,18 @@ RUN() {
 }
 
 # Example: run training (you can replace or pass different args)
-RUN -c /app/configs/hetero4_hgt_reg.yaml
-RUN -c /app/configs/hetero4_hgt_reg.yaml -m val
-RUN -c /app/configs/hetero4_hgt_reg.yaml -m test
+RUN -c /app/configs/hetero5_rgcn_reg.yaml
+RUN -c /app/configs/hetero5_rgcn_reg.yaml -m val
+RUN -c /app/configs/hetero5_rgcn_reg.yaml -m test
 
-RUN -c /app/configs/hetero4_hgt_cls.yaml
-RUN -c /app/configs/hetero4_hgt_cls.yaml -m val
-RUN -c /app/configs/hetero4_hgt_cls.yaml -m test
+RUN -c /app/configs/hetero5_rgcn_cls.yaml
+RUN -c /app/configs/hetero5_rgcn_cls.yaml -m val
+RUN -c /app/configs/hetero5_rgcn_cls.yaml -m test
+
+RUN -c /app/configs/hetero5_hgt_reg.yaml
+RUN -c /app/configs/hetero5_hgt_reg.yaml -m val
+RUN -c /app/configs/hetero5_hgt_reg.yaml -m test
+
+RUN -c /app/configs/hetero5_hgt_cls.yaml
+RUN -c /app/configs/hetero5_hgt_cls.yaml -m val
+RUN -c /app/configs/hetero5_hgt_cls.yaml -m test

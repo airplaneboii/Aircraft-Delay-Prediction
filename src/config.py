@@ -15,11 +15,11 @@ DEFAULT_ROWS = None
 DEFAULT_DATA_PATH = "data/datasets/"
 DEFAULT_NORMALIZE = True
 DEFAULT_DATA_SPLIT = "80,10,10"
-DEFAULT_USE_SLIDING_WINDOWS = False
+DEFAULT_USE_SLIDING_WINDOWS = True
 
 # --- Sliding Window ---
 DEFAULT_UNIT = 60  # minutes per time unit
-DEFAULT_LEARN_WINDOW = 10  # number of units to learn from
+DEFAULT_LEARN_WINDOW = 10  # number of units to learn from (default: 10 hours when unit=60)
 DEFAULT_PRED_WINDOW = 1  # number of units to predict
 DEFAULT_WINDOW_STRIDE = 1  # number of units to slide by
 
@@ -141,7 +141,7 @@ def get_args():
     # Graph
     # ========================================
     parser.add_argument("-g", "--graph_type", type=str, 
-                        choices=["base", "hetero1", "hetero2", "hetero3", "hetero4", "not_very_hetero", "homo", "hetero2nodes"], 
+                        choices=["base", "hetero1", "hetero2", "hetero3", "hetero4", "hetero5", "not_very_hetero", "homo", "hetero2nodes"], 
                         default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=DEFAULT_SAVE_GRAPH,

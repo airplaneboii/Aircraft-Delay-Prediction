@@ -19,23 +19,23 @@ use_sliding_windows: true  # use sliding window approach for temporal training
 # Sliding Window Parameters
 # ========================================
 unit: 60  # Time unit in minutes (1 hour)
-learn_window: 10  # Learning window: 10 units (10 hours)
+learn_window: 24  # Learning window: 24 units (24 hours)
 pred_window: 1  # Prediction window: 1 unit (1 hour)
 window_stride: 1  # Slide by 1 unit (1 hour)
 
 # ========================================
 # Graph
 # ========================================
-graph_type: hetero4
-save_graph: hetero4_12M
-load_graph: hetero4_12M
+graph_type: hetero5
+save_graph: hetero5_12M
+load_graph: hetero5_12M
 
 # ========================================
 # Model
 # ========================================
 model_type: rgcn
 prediction_type: regression
-model_file: "rgcn_hetero4_12m_sliding"
+model_file: "rgcn_hetero5_12m_sliding"
 hidden_channels: 64
 num_layers: 2
 dropout: 0.2

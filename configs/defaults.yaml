@@ -9,7 +9,7 @@ rows: null
 data_path: data/datasets/
 data_split: [80, 10, 10]
 normalize: true
-use_sliding_windows: false
+use_sliding_windows: true
 
 # Sliding Window
 unit: 60

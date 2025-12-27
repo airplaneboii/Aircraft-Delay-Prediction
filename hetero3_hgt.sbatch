@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1                    # Number of tasks
 #SBATCH --cpus-per-task=8             # CPU cores per task
 #SBATCH --mem=100G                     # Memory
-#SBATCH --time=12:00:00               # Walltime
+#SBATCH --time=24:00:00               # Walltime
 #SBATCH --output="logs/%x_%j.log"       # Stdout
 #SBATCH --error="logs/%x_%j.log"        # Stderr
 
