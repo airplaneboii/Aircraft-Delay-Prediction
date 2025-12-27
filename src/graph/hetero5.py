@@ -204,7 +204,7 @@ class HeteroGraph5:
                 row["DISTANCE"] / 5000.0 if pd.notna(row["DISTANCE"]) else 0,  # Normalized
                 row["dep_timestamp_norm"],  # Temporal position
                 # ARR_DELAY feature - this will be masked during val/test
-                row["ARR_DELAY"] / 100.0 if pd.notna(row["ARR_DELAY"]) and idx in train_index_set else 0.0,
+                row["ARR_DELAY"] if pd.notna(row["ARR_DELAY"]) and idx in train_index_set else 0.0,
                 1.0 if idx in train_index_set else 0.0,  # is_training mask
             ]
             flight_features.append(feat)

@@ -26,16 +26,16 @@ window_stride: 1
 # ========================================
 # Graph
 # ========================================
-graph_type: hetero4
-save_graph: hetero4_2M
-load_graph: hetero4_2M
+graph_type: hetero5
+save_graph: hetero5_2M
+load_graph: hetero5_2M
 
 # ========================================
 # Model
 # ========================================
 model_type: rgcn
 prediction_type: regression
-model_file: "rgcn_hetero4_2m_sliding"
+model_file: "rgcn_hetero5_2m_sliding"
 hidden_channels: 64
 num_layers: 2
 dropout: 0.2
