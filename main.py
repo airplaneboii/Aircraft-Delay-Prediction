@@ -7,6 +7,7 @@ from src.graph.hetero1 import HeteroGraph1
 from src.graph.hetero2 import HeteroGraph2
 from src.graph.hetero3 import HeteroGraph3
 from src.graph.hetero4 import HeteroGraph4
+from src.graph.hetero5 import HeteroGraph5
 from src.graph.not_very_hetero import NotVeryHetero
 from src.graph.homo import HomoGraph
 from src.graph.hetero2nodes import Hetero2Nodes
@@ -26,6 +27,7 @@ GRAPH_BUILDERS = {
     "hetero2": HeteroGraph2,
     "hetero3": HeteroGraph3,
     "hetero4": HeteroGraph4,
+    "hetero5": HeteroGraph5,
     "not_very_hetero": NotVeryHetero,
     "homo": HomoGraph,
     "hetero2nodes": Hetero2Nodes,

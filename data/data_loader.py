@@ -39,15 +39,11 @@ def load_data(
     if "CANCELLED" in df.columns:
         df = df[df["CANCELLED"] == 0].reset_index(drop=True)
 
+    zero_neg = True
     # Ensure arrival delays are non-negative: set negative ARR_DELAY to 0
-    if "ARR_DELAY" in df.columns:
+    if zero_neg and "ARR_DELAY" in df.columns:
         df["ARR_DELAY"] = pd.to_numeric(df["ARR_DELAY"], errors="coerce")
         df["ARR_DELAY"] = df["ARR_DELAY"].clip(lower=0).fillna(0)
-
-    if task_type == "regression":
-        df["y"] = df["ARR_DELAY"] if "ARR_DELAY" in df.columns else 0
-    else:
-        df["y"] = df["ARR_DEL15"] if "ARR_DEL15" in df.columns else 0
 
     # Build timestamps
     if "FL_DATE" not in df.columns or not pd.api.types.is_datetime64_any_dtype(df["FL_DATE"]):
@@ -210,7 +206,6 @@ def compute_windows_from_graph(graph, unit, learn_window, pred_window, window_st
     Returns:
         window_splits: Dict with 'train'/'val'/'test' window lists
     """
-    import torch
     import numpy as np
     
     # Get timestamps from graph. Prefer absolute minutes if available to preserve true span

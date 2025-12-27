@@ -14,7 +14,7 @@ model_dir: pretrained/models/
 log_dir: logs/
 model_file: homo_rgcn_reg
 criterion: huber
-amp: false
+amp: true
 compile: false
 compile_backend: inductor
 compile_mode: default

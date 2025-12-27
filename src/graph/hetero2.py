@@ -251,6 +251,26 @@ class HeteroGraph2:
 
         num_flights = len(self.df) #Every line in data is a different flight
         data["flight"].x = torch.tensor(flight_arr, dtype=torch.float)
+        
+        # Add timestamps for windowing support
+        # Create departure timestamps
+        self.df["dep_minutes_calc"] = self.df["CRS_DEP_TIME"].apply(hhmm_to_minutes)
+        self.df["dep_timestamp"] = self.df["FL_DATE"] + pd.to_timedelta(self.df["dep_minutes_calc"], unit="m")
+        
+        # Store absolute minutes since first timestamp for windowing
+        min_timestamp = self.df["dep_timestamp"].min()
+        max_timestamp = self.df["dep_timestamp"].max()
+        timestamp_range = (max_timestamp - min_timestamp).total_seconds()
+        
+        if timestamp_range > 0:
+            self.df["dep_timestamp_norm"] = ((self.df["dep_timestamp"] - min_timestamp).dt.total_seconds() / timestamp_range).astype(np.float32)
+        else:
+            self.df["dep_timestamp_norm"] = 0.0
+        
+        self.df["dep_timestamp_minutes"] = ((self.df["dep_timestamp"] - min_timestamp).dt.total_seconds() / 60.0).astype(np.float32)
+        
+        data["flight"].timestamp = torch.tensor(self.df["dep_timestamp_norm"].values, dtype=torch.float32)
+        data["flight"].timestamp_min = torch.tensor(self.df["dep_timestamp_minutes"].values, dtype=torch.float32)
 
         # Edges
 

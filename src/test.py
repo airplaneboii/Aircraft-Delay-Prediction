@@ -80,9 +80,21 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
 
 def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
     """Evaluate on sliding windows using induced subgraphs."""
-    from src.subgraph_builder import build_window_subgraph
+    from src.subgraph_builder import WindowSubgraphBuilder
     
-    print(f"Evaluating {len(window_defs)} windows using induced subgraphs")
+    print(f"Evaluating {len(window_defs)} windows using iterative subgraph builder")
+    # Use GPU-resident builder when graph is on GPU to avoid transfers
+    use_gpu = graph["flight"].x.device.type == 'cuda'
+    builder = WindowSubgraphBuilder(
+        graph,
+        unit=getattr(args, "unit", None),
+        learn_window=getattr(args, "learn_window", None),
+        pred_window=getattr(args, "pred_window", None),
+        window_stride=getattr(args, "window_stride", None),
+        use_gpu_resident=use_gpu,
+    )
+    if use_gpu:
+        logger.info("Using GPU-resident WindowSubgraphBuilder for evaluation (zero-copy subgraph building)")
     
     # Get ARR_DELAY feature index for masking
     feat_map = getattr(graph["flight"], "feat_index", None)
@@ -98,9 +110,12 @@ def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_s
         learn_indices = window_info['learn_indices']
         pred_indices = window_info['pred_indices']
         
-        # Build induced subgraph for this window
-        subgraph, local_pred_mask = build_window_subgraph(
-            graph, learn_indices, pred_indices, device=device
+        # Build induced subgraph for this window using the iterative builder
+        subgraph, local_pred_mask = builder.build_subgraph(
+            learn_indices,
+            pred_indices,
+            device=device,
+            window_time_range=window_info.get("time_range"),
         )
         
         # Mask ARR_DELAY in the subgraph for prediction window

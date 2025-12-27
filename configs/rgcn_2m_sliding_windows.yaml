@@ -18,10 +18,10 @@ use_sliding_windows: true  # use sliding window approach for temporal training
 # ========================================
 # Sliding Window Parameters
 # ========================================
-unit: 60  # Time unit in minutes (1 hour)
-learn_window: 10  # Learning window: 10 units (10 hours)
-pred_window: 1  # Prediction window: 1 unit (1 hour)
-window_stride: 1  # Slide by 1 unit (1 hour)
+unit: 60  # Time unit in minutes
+learn_window: 24
+pred_window: 1
+window_stride: 1
 
 # ========================================
 # Graph
@@ -52,9 +52,9 @@ criterion: huber  # huber loss for regression (robust to outliers)
 # ========================================
 # Performance
 # ========================================
-amp: true  # disabled for stability
-compile: false  # PyTorch 2.x compilation disabled
-neighbor_sampling: false  # full-batch training
+amp: true
+compile: false
+neighbor_sampling: false
 
 # ========================================
 # Directories

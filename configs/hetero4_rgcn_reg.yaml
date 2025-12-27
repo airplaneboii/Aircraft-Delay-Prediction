@@ -39,7 +39,7 @@ neighbor_sampling: false
 neighbor_fanouts: "15,10"
 
 # Performance
-amp: false
+amp: true
 compile: false
 compile_backend: inductor
 compile_mode: default

@@ -52,7 +52,7 @@ criterion: huber  # huber loss for regression (robust to outliers)
 # ========================================
 # Performance
 # ========================================
-amp: false  # disabled for stability
+amp: true  # disabled for stability
 compile: false  # PyTorch 2.x compilation disabled
 neighbor_sampling: false  # full-batch training
 
