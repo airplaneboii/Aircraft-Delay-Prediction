@@ -33,7 +33,7 @@ num_layers: 2
 dropout: 0.2
 
 # Training
-epochs: 200
+epochs: 50
 lr: 0.001
 weight_decay: 0.000001
 batch_size: 150000
