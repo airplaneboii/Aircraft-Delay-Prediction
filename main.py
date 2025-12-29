@@ -64,7 +64,26 @@ def build_model(args, metadata, in_channels_dict):
     raise ValueError("Unsupported model type.")
 
 
-
+def prepare_window_defs(raw_windows, n_nodes):
+    import numpy as np
+    if not raw_windows or n_nodes is None or n_nodes == 0:
+        return []
+    defs = []
+    for w in raw_windows:
+        learn_mask = np.zeros(n_nodes, dtype=bool)
+        pred_mask = np.zeros(n_nodes, dtype=bool)
+        learn_mask[w['learn_indices']] = True
+        pred_mask[w['pred_indices']] = True
+        defs.append({
+            'window_id': w['window_id'],
+            'learn_mask': learn_mask,
+            'pred_mask': pred_mask,
+            'learn_indices': w['learn_indices'],
+            'pred_indices': w['pred_indices'],
+            'learn_count': w.get('learn_count', int(len(w['learn_indices']))),
+            'pred_count': w.get('pred_count', int(len(w['pred_indices']))),
+        })
+    return defs
 
 def resolve_n_nodes(first_graph, df):
     if df is not None:
@@ -217,9 +236,9 @@ def main():
     model_path = os.path.join(args.model_dir, model_filename)
 
     if args.mode == "train":
-        # Get train windows (raw windows already contain index arrays and counts)
+        # Get train windows and prepare window_defs
         raw_train_windows = window_splits.get('train', []) if isinstance(window_splits, dict) else (window_splits if window_splits else [])
-        window_defs = raw_train_windows
+        window_defs = prepare_window_defs(raw_train_windows, n_nodes)
 
         working_graph = first_graph
         # When using sliding windows with GPU, keep graph on GPU for zero-copy subgraph building
@@ -260,7 +279,7 @@ def main():
 
         # Get windows for the appropriate split and prepare defs FIRST (used to decide device move)
         raw_eval_windows = window_splits.get(args.mode, []) if isinstance(window_splits, dict) else []
-        eval_window_defs = raw_eval_windows
+        eval_window_defs = prepare_window_defs(raw_eval_windows, n_nodes)
 
         # Use the graph we already built
         if first_graph is not None:
