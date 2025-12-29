@@ -10,12 +10,13 @@ except Exception:
     psutil = None
 
 
-def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
+def _evaluate_single(model, graph, args, eval_indices, use_neighbor_sampling, fanouts, device, logger, start_ts):
     """Evaluate on a single dataset split (no windows)."""
     all_labels = []
     all_preds = []
     
-    eval_nodes = eval_mask.nonzero(as_tuple=False).view(-1)
+    # eval_indices is already a tensor of node indices
+    eval_nodes = eval_indices.to(device)
     
     # Create loader if using neighbor sampling
     if use_neighbor_sampling:
@@ -58,13 +59,13 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
             out = model(graph.x_dict, graph.edge_index_dict)
             
             if args.prediction_type == "regression":
-                labels = get_labels(graph, "regression", eval_mask)
-                preds = out.squeeze(-1)[eval_mask]
+                labels = get_labels(graph, "regression", eval_indices)
+                preds = out.squeeze(-1)[eval_indices]
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds.detach().cpu())
             else:
-                labels = get_labels(graph, "classification", eval_mask)
-                logits = out[eval_mask]
+                labels = get_labels(graph, "classification", eval_indices)
+                logits = out[eval_indices]
                 probs = torch.sigmoid(logits)
                 preds = (probs >= args.border).long()
                 all_labels.append(labels.detach().cpu())
@@ -78,7 +79,7 @@ def _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanou
     compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
 
 
-def _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts):
+def _evaluate_windows(model, graph, args, window_defs, eval_indices, use_neighbor_sampling, fanouts, device, logger, start_ts):
     """Evaluate on sliding windows using induced subgraphs."""
     from src.subgraph_builder import WindowSubgraphBuilder
     
@@ -182,10 +183,15 @@ def test(
     device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
     
+    # Get split boundaries and create indices on-the-fly
+    train_end = graph["flight"].split_train_end
+    val_end = graph["flight"].split_val_end
+    n_flights = graph["flight"].x.size(0)
+    
     if args.mode == "val":
-        eval_mask = graph["flight"].val_mask
+        eval_indices = torch.arange(train_end, val_end, dtype=torch.long)
     elif args.mode == "test":
-        eval_mask = graph["flight"].test_mask
+        eval_indices = torch.arange(val_end, n_flights, dtype=torch.long)
     else:
         raise ValueError(f"Invalid mode for testing: {args.mode}")
 
@@ -195,11 +201,11 @@ def test(
     model.eval()
     
     if window_defs is None:
-        # No sliding windows: evaluate on full split (legacy behavior)
+        # No sliding windows: evaluate on full split
         logger.info(f"Evaluating {args.mode} on full split (no windows)")
-        _evaluate_single(model, graph, args, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts)
+        _evaluate_single(model, graph, args, eval_indices, use_neighbor_sampling, fanouts, device, logger, start_ts)
     else:
         # Sliding window evaluation
         logger.info(f"Evaluating {args.mode} on {len(window_defs)} sliding windows")
-        _evaluate_windows(model, graph, args, window_defs, eval_mask, use_neighbor_sampling, fanouts, device, logger, start_ts)
+        _evaluate_windows(model, graph, args, window_defs, eval_indices, use_neighbor_sampling, fanouts, device, logger, start_ts)
 

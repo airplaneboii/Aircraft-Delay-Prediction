@@ -65,30 +65,15 @@ def build_model(args, metadata, in_channels_dict):
 
 
 def prepare_window_defs(raw_windows, n_nodes):
-    import numpy as np
-    """Prepare sliding window definitions without allocating full-size boolean masks.
-
-    This keeps only compact index arrays (converted to np.int32) and counts/metadata
-    to drastically reduce memory usage when the graph contains many nodes.
+    """Pass-through for window definitions (indices already compact int32 from compute_windows_from_graph).
+    
+    This function is kept for backward compatibility but no longer performs conversions.
+    compute_windows_from_graph already produces memory-efficient int32 indices.
     """
-    if not raw_windows or n_nodes is None or n_nodes == 0:
+    if not raw_windows:
         return []
-    defs = []
-    for w in raw_windows:
-        # Keep only index arrays (compact dtype to save memory)
-        learn_idx = np.asarray(w['learn_indices'], dtype=np.int32)
-        pred_idx = np.asarray(w['pred_indices'], dtype=np.int32)
-
-        entry = {
-            'window_id': w.get('window_id'),
-            'learn_indices': learn_idx,
-            'pred_indices': pred_idx,
-            'learn_count': int(w.get('learn_count', learn_idx.size)),
-            'pred_count': int(w.get('pred_count', pred_idx.size)),
-        }
-
-        defs.append(entry)
-    return defs
+    # Windows are already optimized, return as-is
+    return raw_windows
 
 def resolve_n_nodes(first_graph, df):
     if df is not None:
@@ -178,15 +163,15 @@ def main():
     in_channels_dict = { nodeType: first_graph[nodeType].x.size(1) for nodeType in first_graph.metadata()[0]}
     
     # Always compute splits from graph (whether loaded or built)
-    # This updates graph.flight.{train/val/test}_mask which are used throughout training/testing
+    # This stores split boundaries (2 integers) instead of full index arrays or masks
     print("\nComputing splits from graph...")
-    _ = compute_splits_from_graph(
+    split_info = compute_splits_from_graph(
         first_graph,
         split_ratios=tuple(x/100 for x in args.data_split),
     )
-    print(f"Updated graph with split masks: train={first_graph['flight'].train_mask.sum()}, "
-          f"val={first_graph['flight'].val_mask.sum()}, test={first_graph['flight'].test_mask.sum()}")
-    print("Split masks will be used for window generation and training/testing")
+    print(f"Split boundaries stored on graph: train=[0,{split_info['train_end']}), "
+          f"val=[{split_info['train_end']},{split_info['val_end']}), test=[{split_info['val_end']},{split_info['n_flights']})")
+    print("Memory-efficient: only 2 integers stored instead of full masks/indices")
 
     norm_stats = getattr(args, "norm_stats", None)
     n_nodes = resolve_n_nodes(first_graph, df)

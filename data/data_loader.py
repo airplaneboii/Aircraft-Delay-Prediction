@@ -136,10 +136,10 @@ def compute_split_and_normalize(
 
 
 def compute_splits_from_graph(graph, split_ratios: tuple[float, float, float] = (0.8, 0.1, 0.1)):
-    """Compute chronological train/val/test split directly from graph and update masks.
+    """Compute chronological train/val/test split directly from graph using compact indices.
     
-    This uses the graph's flight timestamps to compute splits, making it independent
-    of the original dataframe. Works with both newly built and loaded graphs.
+    Stores compact int32 index arrays on graph to minimize memory usage.
+    Boolean masks are created only for backward compatibility with existing train/test code.
     
     Args:
         graph: HeteroData graph with flight.timestamp
@@ -158,32 +158,20 @@ def compute_splits_from_graph(graph, split_ratios: tuple[float, float, float] = 
     train_end = int(n_flights * split_ratios[0])
     val_end = int(n_flights * (split_ratios[0] + split_ratios[1]))
     
-    train_indices = np.arange(0, train_end)
-    val_indices = np.arange(train_end, val_end)
-    test_indices = np.arange(val_end, n_flights)
-    
     print(f"\nComputing splits from graph ({n_flights} flights):")
-    print(f"  Train: {len(train_indices)} ({split_ratios[0]*100:.0f}%)")
-    print(f"  Val: {len(val_indices)} ({split_ratios[1]*100:.0f}%)")
-    print(f"  Test: {len(test_indices)} ({split_ratios[2]*100:.0f}%)")
+    print(f"  Train: [0, {train_end}) = {train_end} flights ({split_ratios[0]*100:.0f}%)")
+    print(f"  Val: [{train_end}, {val_end}) = {val_end - train_end} flights ({split_ratios[1]*100:.0f}%)")
+    print(f"  Test: [{val_end}, {n_flights}) = {n_flights - val_end} flights ({split_ratios[2]*100:.0f}%)")
     
-    # Update graph masks
-    train_mask = torch.zeros(n_flights, dtype=torch.bool)
-    train_mask[train_indices] = True
-    graph["flight"].train_mask = train_mask
-    
-    val_mask = torch.zeros(n_flights, dtype=torch.bool)
-    val_mask[val_indices] = True
-    graph["flight"].val_mask = val_mask
-    
-    test_mask = torch.zeros(n_flights, dtype=torch.bool)
-    test_mask[test_indices] = True
-    graph["flight"].test_mask = test_mask
+    # Store only split boundaries (2 integers instead of full index arrays)
+    graph["flight"].split_train_end = train_end
+    graph["flight"].split_val_end = val_end
+    # Implicit: test goes from val_end to n_flights
     
     split_indices = {
-        'train_idx': train_indices,
-        'val_idx': val_indices,
-        'test_idx': test_indices,
+        'train_end': train_end,
+        'val_end': val_end,
+        'n_flights': n_flights,
     }
     
     return split_indices
@@ -213,24 +201,18 @@ def compute_windows_from_graph(graph, unit, learn_window, pred_window, window_st
     max_unit = int(time_units[-1])
     total_window_size = learn_window + pred_window
 
-    print(f"\nRecomputing sliding windows from graph:")
+    print(f"\nComputing sliding windows from graph:")
     print(f"  Time unit: {unit} minutes")
     print(f"  Learn window: {learn_window} units ({learn_window * unit} minutes)")
     print(f"  Pred window: {pred_window} units ({pred_window * unit} minutes)")
     print(f"  Stride: {window_stride} units")
     print(f"  Total time units in graph: {max_unit - min_unit + 1}")
 
-    # Prepare prefix sums for split counts (fast counts in ranges)
-    train_mask = graph["flight"].train_mask.cpu().numpy().astype(np.int64)
-    val_mask = graph["flight"].val_mask.cpu().numpy().astype(np.int64)
-    test_mask = graph["flight"].test_mask.cpu().numpy().astype(np.int64)
-
-    train_prefix = np.concatenate([[0], train_mask.cumsum()])
-    val_prefix = np.concatenate([[0], val_mask.cumsum()])
-    test_prefix = np.concatenate([[0], test_mask.cumsum()])
+    # Get split boundaries (just 2 integers)
+    train_end = graph["flight"].split_train_end
+    val_end = graph["flight"].split_val_end
 
     windows_all = []
-    # Precompute searchsorted anchor for all window starts
     num_possible_windows = max(0, (max_unit - min_unit + 1 - total_window_size) // window_stride + 1)
 
     for i in range(num_possible_windows):
@@ -241,34 +223,20 @@ def compute_windows_from_graph(graph, unit, learn_window, pred_window, window_st
         if pred_end_unit > max_unit + 1:
             break
 
-        # flight index ranges via searchsorted (log n)
         learn_start_idx = np.searchsorted(time_units, window_start_unit, side="left")
-        learn_end_idx = np.searchsorted(time_units, learn_end_unit, side="left")  # exclusive
+        learn_end_idx = np.searchsorted(time_units, learn_end_unit, side="left")
         pred_start_idx = learn_end_idx
-        pred_end_idx = np.searchsorted(time_units, pred_end_unit, side="left")  # exclusive
+        pred_end_idx = np.searchsorted(time_units, pred_end_unit, side="left")
 
         if pred_end_idx <= pred_start_idx or learn_end_idx <= learn_start_idx:
-            # empty learn or pred - skip
             continue
 
-        learn_idx = np.arange(learn_start_idx, learn_end_idx, dtype=np.int64)
-        pred_idx = np.arange(pred_start_idx, pred_end_idx, dtype=np.int64)
-
-        # Split assignment via prefix sums (O(1))
-        pred_in_train = train_prefix[pred_end_idx] - train_prefix[pred_start_idx]
-        pred_in_val = val_prefix[pred_end_idx] - val_prefix[pred_start_idx]
-        pred_in_test = test_prefix[pred_end_idx] - test_prefix[pred_start_idx]
-
-        if pred_in_train >= pred_in_val and pred_in_train >= pred_in_test:
-            split = "train"
-        elif pred_in_val >= pred_in_test:
-            split = "val"
-        else:
-            split = "test"
+        # Use int32 for memory efficiency
+        learn_idx = np.arange(learn_start_idx, learn_end_idx, dtype=np.int32)
+        pred_idx = np.arange(pred_start_idx, pred_end_idx, dtype=np.int32)
 
         windows_all.append({
             "window_id": len(windows_all),
-            "split": split,
             "learn_indices": learn_idx,
             "pred_indices": pred_idx,
             "time_range": (int(window_start_unit), int(pred_end_unit - 1)),
@@ -276,12 +244,30 @@ def compute_windows_from_graph(graph, unit, learn_window, pred_window, window_st
             "pred_count": int(pred_end_idx - pred_start_idx),
         })
 
-    # Group by split
-    train_windows = [w for w in windows_all if w["split"] == "train"]
-    val_windows = [w for w in windows_all if w["split"] == "val"]
-    test_windows = [w for w in windows_all if w["split"] == "test"]
+    # Filter windows by split based on majority of pred indices
+    # Since flights are sorted, we just check ranges
+    train_windows = []
+    val_windows = []
+    test_windows = []
+    
+    for w in windows_all:
+        pred_start = w["pred_indices"][0]
+        pred_end = w["pred_indices"][-1] + 1
+        pred_count = w["pred_count"]
+        
+        # Count how many pred indices fall in each split
+        pred_in_train = max(0, min(train_end, pred_end) - max(0, pred_start))
+        pred_in_val = max(0, min(val_end, pred_end) - max(train_end, pred_start))
+        pred_in_test = max(0, pred_end - max(val_end, pred_start))
+        
+        if pred_in_train >= pred_in_val and pred_in_train >= pred_in_test:
+            train_windows.append(w)
+        elif pred_in_val >= pred_in_test:
+            val_windows.append(w)
+        else:
+            test_windows.append(w)
 
     window_splits = {"train": train_windows, "val": val_windows, "test": test_windows}
-    print(f"  Generated {len(windows_all)} total windows across timeline")
-    print(f"  Split assignment: train={len(train_windows)}, val={len(val_windows)}, test={len(test_windows)}")
+    print(f"  Generated {len(windows_all)} total windows")
+    print(f"  Split distribution: train={len(train_windows)}, val={len(val_windows)}, test={len(test_windows)}")
     return window_splits

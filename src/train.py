@@ -242,16 +242,12 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 out = model(graph.x_dict, graph.edge_index_dict)
 
             if args.prediction_type == "regression":
-                base_mask = graph["flight"].train_mask
-                if hasattr(graph["flight"], "target_mask"):
-                    mask = base_mask & graph["flight"].target_mask
-                elif hasattr(graph["flight"], "window_mask"):
-                    mask = base_mask & graph["flight"].window_mask
-                else:
-                    mask = base_mask
-
-                labels = get_labels(graph, "regression", mask).to(device)
-                preds = out.squeeze(-1)[mask]
+                # Create train indices on-the-fly from split boundary
+                train_end = graph["flight"].split_train_end
+                train_idx = torch.arange(0, train_end, dtype=torch.long, device=device)
+                
+                labels = get_labels(graph, "regression", train_idx).to(device)
+                preds = out.squeeze(-1)[train_idx]
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
                 loss = criterion(preds, labels)
@@ -270,11 +266,13 @@ def _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, op
                 all_labels.append(labels.detach().cpu())
                 all_preds.append(preds_for_metrics)
             else:
-                mask = graph["flight"].train_mask
-                labels = get_labels(graph, "classification", mask).to(device)
-                # Ensure logits is 1-D before masking
+                # Create train indices on-the-fly from split boundary
+                train_end = graph["flight"].split_train_end
+                train_idx = torch.arange(0, train_end, dtype=torch.long, device=device)
+                labels = get_labels(graph, "classification", train_idx).to(device)
+                # Ensure logits is 1-D before indexing
                 logits_all = out.squeeze(-1)
-                logits = logits_all[mask].to(device)
+                logits = logits_all[train_idx].to(device)
                 if criterion is None:
                     raise ValueError("A loss `criterion` must be provided to _train_legacy via train()")
                 loss = criterion(logits, labels)
@@ -348,7 +346,10 @@ def train(
         else:
             raise ValueError(f"Unknown regression criterion: {args.criterion}")
     else:
-        y = get_labels(graph, "classification", graph["flight"].train_mask).view(-1)
+        # Create train indices on-the-fly from split boundary
+        train_end = graph["flight"].split_train_end
+        train_idx = torch.arange(0, train_end, dtype=torch.long)
+        y = get_labels(graph, "classification", train_idx).view(-1)
         num_pos = (y == 1).sum().item()
         num_neg = (y == 0).sum().item()
         print(num_pos, num_neg)
@@ -362,7 +363,9 @@ def train(
     fanouts = resolve_fanouts(model, getattr(args, "neighbor_fanouts", None))
 
     if use_neighbor_sampling:
-        train_nodes = graph["flight"].train_mask.nonzero(as_tuple=False).view(-1)
+        # Create train indices on-the-fly from split boundary
+        train_end = graph["flight"].split_train_end
+        train_nodes = torch.arange(0, train_end, dtype=torch.long, device=device)
         input_nodes = ("flight", train_nodes)
         
         loader = NeighborLoader(
