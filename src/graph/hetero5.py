@@ -61,7 +61,7 @@ class HeteroGraph5:
         airport_dest_norm = airport_dest_counts / max_dest
 
         # Categorical features from lookup data
-        airport_info = self.df[["ORIGIN_AIRPORT_ID", "ORIGIN_CITY_MARKET_ID", "ORIGIN_WAC"]].drop_duplicates(subset=["ORIGIN_AIRPORT_ID"])
+        airport_info = self.df[["ORIGIN_AIRPORT_ID", "ORIGIN_CITY_MARKET_ID", "ORIGIN_WAC"]].drop_duplicates(subset=["ORIGIN_AIRPORT_ID"]) 
         airport_info_dict = {row["ORIGIN_AIRPORT_ID"]: row for _, row in airport_info.iterrows()}
 
         dest_info = self.df[["DEST_AIRPORT_ID", "DEST_CITY_MARKET_ID", "DEST_WAC"]].drop_duplicates(subset=["DEST_AIRPORT_ID"])
@@ -71,25 +71,33 @@ class HeteroGraph5:
         all_city_markets = sorted(set(self.df["ORIGIN_CITY_MARKET_ID"]).union(set(self.df["DEST_CITY_MARKET_ID"])))
         all_wac = sorted(set(self.df["ORIGIN_WAC"]).union(set(self.df["DEST_WAC"])))
 
+        # Fit encoders once
         city_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
         city_encoder.fit(np.array(all_city_markets).reshape(-1, 1))
-        
         wac_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
         wac_encoder.fit(np.array(all_wac).reshape(-1, 1))
 
-        airport_features = []
+        # Build arrays of city/wac ids for all airports (vectorized -> single transform call)
+        city_ids = []
+        wac_ids = []
         for a in airports:
             info = airport_info_dict.get(a, {})
             city_id = info.get("ORIGIN_CITY_MARKET_ID", info.get("DEST_CITY_MARKET_ID", all_city_markets[0]))
             wac_id = info.get("ORIGIN_WAC", info.get("DEST_WAC", all_wac[0]))
-            
-            city_onehot = city_encoder.transform([[city_id]])[0]
-            wac_onehot = wac_encoder.transform([[wac_id]])[0]
-            
-            feat = np.concatenate([[airport_origin_norm[a], airport_dest_norm[a]], city_onehot, wac_onehot])
-            airport_features.append(feat)
+            city_ids.append(city_id)
+            wac_ids.append(wac_id)
+        city_arr = city_encoder.transform(np.array(city_ids).reshape(-1, 1)).astype(np.float32)
+        wac_arr = wac_encoder.transform(np.array(wac_ids).reshape(-1, 1)).astype(np.float32)
 
-        data["airport"].x = torch.tensor(np.array(airport_features), dtype=torch.float32)
+        # Base numeric features (normalized counts)
+        base_counts = np.stack([airport_origin_norm.values.astype(np.float32), airport_dest_norm.values.astype(np.float32)], axis=1)
+
+        airport_features_arr = np.concatenate([base_counts, city_arr, wac_arr], axis=1)
+        data["airport"].x = torch.from_numpy(airport_features_arr).float()
+
+        # free temporaries
+        del city_arr, wac_arr, city_ids, wac_ids, airport_features_arr, base_counts
+        import gc; gc.collect()
 
         ######### AIRCRAFT FEATURES (RICHER - from hetero3) ############
         
@@ -156,75 +164,86 @@ class HeteroGraph5:
         # Convert departure time to minutes
         self.df["dep_minutes"] = self.df["CRS_DEP_TIME"].apply(hhmm_to_minutes)
         self.df["arr_minutes"] = self.df["CRS_ARR_TIME"].apply(hhmm_to_minutes)
-        
+
         # Create timestamps
         self.df["dep_timestamp"] = self.df["FL_DATE"] + pd.to_timedelta(self.df["dep_minutes"], unit="m")
         self.df["arr_timestamp"] = self.df["FL_DATE"] + pd.to_timedelta(self.df["arr_minutes"], unit="m")
-        
-        # Normalize timestamps to [0, 1] range for neural network
+
+        # Normalize timestamps to [0, 1] range for neural network (float32)
         min_timestamp = self.df["dep_timestamp"].min()
         max_timestamp = self.df["dep_timestamp"].max()
         timestamp_range = (max_timestamp - min_timestamp).total_seconds()
-        
+
         if timestamp_range > 0:
             self.df["dep_timestamp_norm"] = ((self.df["dep_timestamp"] - min_timestamp).dt.total_seconds() / timestamp_range).astype(np.float32)
         else:
-            self.df["dep_timestamp_norm"] = 0.0
+            self.df["dep_timestamp_norm"] = np.float32(0.0)
 
         # Also store absolute minutes since the first timestamp for downstream windowing
-        # This preserves the real temporal extent (days/months) for unit-based windows
         self.df["dep_timestamp_minutes"] = ((self.df["dep_timestamp"] - min_timestamp).dt.total_seconds() / 60.0).astype(np.float32)
-        
-        # Cyclical time embeddings (from hetero3)
-        dep_time_sin = np.sin(2 * np.pi * self.df["dep_minutes"] / (24 * 60))
-        dep_time_cos = np.cos(2 * np.pi * self.df["dep_minutes"] / (24 * 60))
-        arr_time_sin = np.sin(2 * np.pi * self.df["arr_minutes"] / (24 * 60))
-        arr_time_cos = np.cos(2 * np.pi * self.df["arr_minutes"] / (24 * 60))
-        
-        day_sin = np.sin(2 * np.pi * self.df["DAY_OF_WEEK"] / 7)
-        day_cos = np.cos(2 * np.pi * self.df["DAY_OF_WEEK"] / 7)
-        
-        month_sin = np.sin(2 * np.pi * (self.df["MONTH"] - 1) / 12)
-        month_cos = np.cos(2 * np.pi * (self.df["MONTH"] - 1) / 12)
-        
-        # Flight features including ARR_DELAY (will be masked during val/test)
-        flight_features = []
-        train_index_set = set(self.train_index)
-        for idx, row in self.df.iterrows():
-            feat = [
-                dep_time_sin[idx],
-                dep_time_cos[idx],
-                arr_time_sin[idx],
-                arr_time_cos[idx],
-                day_sin[idx],
-                day_cos[idx],
-                month_sin[idx],
-                month_cos[idx],
-                row["CRS_ELAPSED_TIME"] / 600.0 if pd.notna(row["CRS_ELAPSED_TIME"]) else 0,  # Normalized
-                row["DISTANCE"] / 5000.0 if pd.notna(row["DISTANCE"]) else 0,  # Normalized
-                row["dep_timestamp_norm"],  # Temporal position
-                # ARR_DELAY feature - this will be masked during val/test
-                row["ARR_DELAY"] if pd.notna(row["ARR_DELAY"]) and idx in train_index_set else 0.0,
-                1.0 if idx in train_index_set else 0.0,  # is_training mask
-            ]
-            flight_features.append(feat)
-        
-        data["flight"].x = torch.tensor(np.array(flight_features), dtype=torch.float32)
+
+        # Cyclical time embeddings (vectorized, float32)
+        dep_time_sin = np.sin(2 * np.pi * self.df["dep_minutes"] / (24 * 60)).astype(np.float32)
+        dep_time_cos = np.cos(2 * np.pi * self.df["dep_minutes"] / (24 * 60)).astype(np.float32)
+        arr_time_sin = np.sin(2 * np.pi * self.df["arr_minutes"] / (24 * 60)).astype(np.float32)
+        arr_time_cos = np.cos(2 * np.pi * self.df["arr_minutes"] / (24 * 60)).astype(np.float32)
+
+        day_sin = np.sin(2 * np.pi * self.df["DAY_OF_WEEK"] / 7).astype(np.float32)
+        day_cos = np.cos(2 * np.pi * self.df["DAY_OF_WEEK"] / 7).astype(np.float32)
+
+        month_sin = np.sin(2 * np.pi * (self.df["MONTH"] - 1) / 12).astype(np.float32)
+        month_cos = np.cos(2 * np.pi * (self.df["MONTH"] - 1) / 12).astype(np.float32)
+
+        # Vectorized flight features (fast, float32)
+        n_flights = len(self.df)
+        train_mask_np = np.zeros(n_flights, dtype=bool)
+        train_mask_np[self.train_index] = True
+
+        dep_minutes_arr = self.df["dep_minutes"].to_numpy(dtype=np.float32)
+        crs_elapsed = self.df["CRS_ELAPSED_TIME"].fillna(0.0).to_numpy(dtype=np.float32) / 600.0
+        distance_norm = self.df["DISTANCE"].fillna(0.0).to_numpy(dtype=np.float32) / 5000.0
+        dep_ts_norm = self.df["dep_timestamp_norm"].to_numpy(dtype=np.float32)
+        arr_delay_vals = self.df["ARR_DELAY"].fillna(0.0).to_numpy(dtype=np.float32)
+
+        arr_delay_col = np.where(train_mask_np, arr_delay_vals, 0.0).astype(np.float32)
+        is_train_col = train_mask_np.astype(np.float32)
+
+        flight_features_arr = np.column_stack([
+            dep_time_sin,
+            dep_time_cos,
+            arr_time_sin,
+            arr_time_cos,
+            day_sin,
+            day_cos,
+            month_sin,
+            month_cos,
+            crs_elapsed,
+            distance_norm,
+            dep_ts_norm,
+            arr_delay_col,
+            is_train_col,
+        ]).astype(np.float32)
+
+        data["flight"].x = torch.from_numpy(flight_features_arr).float()
 
         # Store feature name -> column index mapping for robustness
         feat_dim = data["flight"].x.size(1)
-        # ARR_DELAY was appended second-to-last, training mask is last
         data["flight"].feat_index = {
             "arr_delay": feat_dim - 2,
             "is_train": feat_dim - 1,
         }
-        
-        # Store normalized and absolute minute timestamps on flight nodes
-        data["flight"].timestamp = torch.tensor(self.df["dep_timestamp_norm"].values, dtype=torch.float32)
-        data["flight"].timestamp_min = torch.tensor(self.df["dep_timestamp_minutes"].values, dtype=torch.float32)
-        
+
+        # Store normalized and absolute minute timestamps on flight nodes (share memory via from_numpy)
+        data["flight"].timestamp = torch.from_numpy(dep_ts_norm).float()
+        data["flight"].timestamp_min = torch.from_numpy(self.df["dep_timestamp_minutes"].to_numpy(dtype=np.float32)).float()
+
         # Store original indices for mask operations
         data["flight"].original_index = torch.arange(len(self.df), dtype=torch.long)
+
+        # Free large temporaries
+        del dep_time_sin, dep_time_cos, arr_time_sin, arr_time_cos, day_sin, day_cos, month_sin, month_cos
+        del crs_elapsed, distance_norm, dep_ts_norm, arr_delay_vals, arr_delay_col, is_train_col, flight_features_arr
+        import gc; gc.collect()
 
         ######### EDGES ############
         

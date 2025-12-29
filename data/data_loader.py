@@ -190,108 +190,98 @@ def compute_splits_from_graph(graph, split_ratios: tuple[float, float, float] = 
 
 
 def compute_windows_from_graph(graph, unit, learn_window, pred_window, window_stride):
-    """
-    Compute sliding window indices from graph timestamps after loading/building.
-    
-    Windows are computed across ALL flights, then assigned to splits based on
-    where their prediction indices fall. This preserves the full temporal continuity.
-    
-    Args:
-        graph: HeteroData graph with flight.timestamp and flight.{train/val/test}_mask
-        unit: Time unit size in minutes
-        learn_window: Number of units for learning window
-        pred_window: Number of units for prediction window
-        window_stride: Stride between windows in units
-    
-    Returns:
-        window_splits: Dict with 'train'/'val'/'test' window lists
-    """
     import numpy as np
-    
-    # Get timestamps from graph. Prefer absolute minutes if available to preserve true span
+
+    # Get timestamps in absolute minutes if present (preferred)
     if hasattr(graph["flight"], "timestamp_min"):
-        timestamps_min = graph["flight"].timestamp_min.cpu().numpy()
-        # Compute unit index directly from absolute minutes
-        time_units = (timestamps_min // unit).astype(int)
+        ts_min = graph["flight"].timestamp_min.cpu().numpy()
+        time_units = (ts_min // unit).astype(int)
     else:
-        # Fallback: use normalized [0,1] timestamp (may compress span to ~1 day)
-        timestamps = graph["flight"].timestamp.cpu().numpy()
-        min_timestamp = timestamps.min()
-        # Approximate units using 24h scale (may undercount if only normalized is available)
-        time_units = (((timestamps - min_timestamp) * 1440).astype(int) // unit)
-    
+        ts = graph["flight"].timestamp.cpu().numpy()
+        t0 = ts.min()
+        time_units = (((ts - t0) * 1440).astype(int) // unit)
+
+    # Ensure time_units is numpy array and sorted by time
+    # (Graph builder should produce sorted flights; if not, sort once)
+    if not np.all(time_units[:-1] <= time_units[1:]):
+        order = np.argsort(time_units)
+        time_units = time_units[order]
+        # Note: if you need to map back to original indices, record 'order'
+
+    n = time_units.size
+    min_unit = int(time_units[0])
+    max_unit = int(time_units[-1])
     total_window_size = learn_window + pred_window
-    min_unit = time_units.min()
-    max_unit = time_units.max()
-    
+
     print(f"\nRecomputing sliding windows from graph:")
     print(f"  Time unit: {unit} minutes")
     print(f"  Learn window: {learn_window} units ({learn_window * unit} minutes)")
     print(f"  Pred window: {pred_window} units ({pred_window * unit} minutes)")
     print(f"  Stride: {window_stride} units")
-    print(f"  Total time units in graph: {max_unit + 1}")
-    
-    # Get split masks
-    train_mask = graph["flight"].train_mask.cpu().numpy()
-    val_mask = graph["flight"].val_mask.cpu().numpy()
-    test_mask = graph["flight"].test_mask.cpu().numpy()
-    
-    # Generate windows across ALL data
+    print(f"  Total time units in graph: {max_unit - min_unit + 1}")
+
+    # Prepare prefix sums for split counts (fast counts in ranges)
+    train_mask = graph["flight"].train_mask.cpu().numpy().astype(np.int64)
+    val_mask = graph["flight"].val_mask.cpu().numpy().astype(np.int64)
+    test_mask = graph["flight"].test_mask.cpu().numpy().astype(np.int64)
+
+    train_prefix = np.concatenate([[0], train_mask.cumsum()])
+    val_prefix = np.concatenate([[0], val_mask.cumsum()])
+    test_prefix = np.concatenate([[0], test_mask.cumsum()])
+
     windows_all = []
-    num_possible_windows = max(1, (max_unit - min_unit + 1 - total_window_size) // window_stride + 1)
-    
+    # Precompute searchsorted anchor for all window starts
+    num_possible_windows = max(0, (max_unit - min_unit + 1 - total_window_size) // window_stride + 1)
+
     for i in range(num_possible_windows):
-        window_start = min_unit + i * window_stride
-        learn_end = window_start + learn_window
-        pred_end = learn_end + pred_window
-        
-        if pred_end > max_unit + 1:
+        window_start_unit = min_unit + i * window_stride
+        learn_end_unit = window_start_unit + learn_window
+        pred_end_unit = learn_end_unit + pred_window
+
+        if pred_end_unit > max_unit + 1:
             break
-        
-        # Find all flights in learn and pred windows
-        learn_mask = (time_units >= window_start) & (time_units < learn_end)
-        pred_mask = (time_units >= learn_end) & (time_units < pred_end)
-        
-        learn_idx = np.where(learn_mask)[0]
-        pred_idx = np.where(pred_mask)[0]
-        
-        if len(learn_idx) > 0 and len(pred_idx) > 0:
-            # Assign window to split based on where MAJORITY of pred indices fall
-            pred_in_train = np.sum(train_mask[pred_idx])
-            pred_in_val = np.sum(val_mask[pred_idx])
-            pred_in_test = np.sum(test_mask[pred_idx])
-            
-            # Assign to split with most pred nodes
-            if pred_in_train >= pred_in_val and pred_in_train >= pred_in_test:
-                split = 'train'
-            elif pred_in_val >= pred_in_test:
-                split = 'val'
-            else:
-                split = 'test'
-            
-            windows_all.append({
-                'window_id': len(windows_all),
-                'split': split,
-                'learn_indices': learn_idx,
-                'pred_indices': pred_idx,
-                'time_range': (int(window_start), int(pred_end - 1)),
-                'pred_start_unit': int(learn_end),
-                'learn_count': int(len(learn_idx)),
-                'pred_count': int(len(pred_idx)),
-            })
-    
-    # Group windows by split
-    train_windows = [w for w in windows_all if w['split'] == 'train']
-    val_windows = [w for w in windows_all if w['split'] == 'val']
-    test_windows = [w for w in windows_all if w['split'] == 'test']
-    
-    window_splits = {
-        'train': train_windows,
-        'val': val_windows,
-        'test': test_windows,
-    }
-    
+
+        # flight index ranges via searchsorted (log n)
+        learn_start_idx = np.searchsorted(time_units, window_start_unit, side="left")
+        learn_end_idx = np.searchsorted(time_units, learn_end_unit, side="left")  # exclusive
+        pred_start_idx = learn_end_idx
+        pred_end_idx = np.searchsorted(time_units, pred_end_unit, side="left")  # exclusive
+
+        if pred_end_idx <= pred_start_idx or learn_end_idx <= learn_start_idx:
+            # empty learn or pred - skip
+            continue
+
+        learn_idx = np.arange(learn_start_idx, learn_end_idx, dtype=np.int64)
+        pred_idx = np.arange(pred_start_idx, pred_end_idx, dtype=np.int64)
+
+        # Split assignment via prefix sums (O(1))
+        pred_in_train = train_prefix[pred_end_idx] - train_prefix[pred_start_idx]
+        pred_in_val = val_prefix[pred_end_idx] - val_prefix[pred_start_idx]
+        pred_in_test = test_prefix[pred_end_idx] - test_prefix[pred_start_idx]
+
+        if pred_in_train >= pred_in_val and pred_in_train >= pred_in_test:
+            split = "train"
+        elif pred_in_val >= pred_in_test:
+            split = "val"
+        else:
+            split = "test"
+
+        windows_all.append({
+            "window_id": len(windows_all),
+            "split": split,
+            "learn_indices": learn_idx,
+            "pred_indices": pred_idx,
+            "time_range": (int(window_start_unit), int(pred_end_unit - 1)),
+            "learn_count": int(learn_end_idx - learn_start_idx),
+            "pred_count": int(pred_end_idx - pred_start_idx),
+        })
+
+    # Group by split
+    train_windows = [w for w in windows_all if w["split"] == "train"]
+    val_windows = [w for w in windows_all if w["split"] == "val"]
+    test_windows = [w for w in windows_all if w["split"] == "test"]
+
+    window_splits = {"train": train_windows, "val": val_windows, "test": test_windows}
     print(f"  Generated {len(windows_all)} total windows across timeline")
     print(f"  Split assignment: train={len(train_windows)}, val={len(val_windows)}, test={len(test_windows)}")
-    
     return window_splits
