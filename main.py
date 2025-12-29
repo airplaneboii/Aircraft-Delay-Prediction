@@ -66,23 +66,28 @@ def build_model(args, metadata, in_channels_dict):
 
 def prepare_window_defs(raw_windows, n_nodes):
     import numpy as np
+    """Prepare sliding window definitions without allocating full-size boolean masks.
+
+    This keeps only compact index arrays (converted to np.int32) and counts/metadata
+    to drastically reduce memory usage when the graph contains many nodes.
+    """
     if not raw_windows or n_nodes is None or n_nodes == 0:
         return []
     defs = []
     for w in raw_windows:
-        learn_mask = np.zeros(n_nodes, dtype=bool)
-        pred_mask = np.zeros(n_nodes, dtype=bool)
-        learn_mask[w['learn_indices']] = True
-        pred_mask[w['pred_indices']] = True
-        defs.append({
-            'window_id': w['window_id'],
-            'learn_mask': learn_mask,
-            'pred_mask': pred_mask,
-            'learn_indices': w['learn_indices'],
-            'pred_indices': w['pred_indices'],
-            'learn_count': w.get('learn_count', int(len(w['learn_indices']))),
-            'pred_count': w.get('pred_count', int(len(w['pred_indices']))),
-        })
+        # Keep only index arrays (compact dtype to save memory)
+        learn_idx = np.asarray(w['learn_indices'], dtype=np.int32)
+        pred_idx = np.asarray(w['pred_indices'], dtype=np.int32)
+
+        entry = {
+            'window_id': w.get('window_id'),
+            'learn_indices': learn_idx,
+            'pred_indices': pred_idx,
+            'learn_count': int(w.get('learn_count', learn_idx.size)),
+            'pred_count': int(w.get('pred_count', pred_idx.size)),
+        }
+
+        defs.append(entry)
     return defs
 
 def resolve_n_nodes(first_graph, df):
