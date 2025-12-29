@@ -18,7 +18,7 @@ pred_window: 1
 window_stride: 1
 
 # Graph
-graph_type: hetero3
+graph_type: hetero5
 save_graph: null
 load_graph: null
 

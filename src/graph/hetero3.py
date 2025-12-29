@@ -7,7 +7,7 @@ from src.utils import normalize_with_idx, hhmm_to_minutes
 
 class HeteroGraph3:
     """
-    HeteroGraph3: extends HeteroGraph2 with additional temporal edges.
+    HeteroGraph3: Graph builder that adds temporal edges and aggregated node features.
     
     Temporal edges (next_same) for:
     - Aircraft: consecutive flights by the same tail number

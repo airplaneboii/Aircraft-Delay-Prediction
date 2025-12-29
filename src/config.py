@@ -24,7 +24,7 @@ DEFAULT_PRED_WINDOW = 1  # number of units to predict
 DEFAULT_WINDOW_STRIDE = 1  # number of units to slide by
 
 # --- Graph ---
-DEFAULT_GRAPH_TYPE = "hetero3"
+DEFAULT_GRAPH_TYPE = "hetero5"
 DEFAULT_SAVE_GRAPH = None
 DEFAULT_LOAD_GRAPH = None
 
@@ -141,7 +141,7 @@ def get_args():
     # Graph
     # ========================================
     parser.add_argument("-g", "--graph_type", type=str, 
-                        choices=["base", "hetero1", "hetero2", "hetero3", "hetero4", "hetero5", "not_very_hetero", "homo", "hetero2nodes"], 
+                        choices=["hetero3", "hetero5"], 
                         default=DEFAULT_GRAPH_TYPE,
                         help=f"Type of graph to build (default: {DEFAULT_GRAPH_TYPE})")
     parser.add_argument("-s", "--save_graph", type=str, default=DEFAULT_SAVE_GRAPH,
@@ -153,7 +153,7 @@ def get_args():
     # Model
     # ========================================
     parser.add_argument("-t", "--model_type", type=str, 
-                        choices=["none", "dummy", "rgcn", "leakyrgcn", "hgt", "heterosage"],
+                        choices=["none", "dummy", "rgcn", "hgt"],
                         default=DEFAULT_MODEL_TYPE, 
                         help=f"Type of model to use (default: {DEFAULT_MODEL_TYPE})")
     parser.add_argument("-F", "--model_file", type=str, default=DEFAULT_MODEL_FILENAME,
@@ -275,7 +275,8 @@ def get_args():
         if files:
             latest = max(files, key=os.path.getmtime)
             args.data_path = latest
-            print(f"Auto-selected latest dataset: {latest}")
+            import logging
+            logging.getLogger("train").info(f"Auto-selected latest dataset: {latest}")
         else:
             raise FileNotFoundError(f"No CSV files found in {search_dir}. Please provide a dataset or run merge.py.")
     else:

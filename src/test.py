@@ -2,7 +2,9 @@ import time
 import torch
 import logging
 from tqdm.auto import tqdm
-from src.utils import resolve_fanouts, get_labels
+from src.utils import resolve_fanouts, get_labels, compute_epoch_stats
+from src.subgraph_builder import WindowSubgraphBuilder
+from torch_geometric.loader import NeighborLoader
 
 try:
     import psutil
@@ -20,16 +22,14 @@ def _evaluate_single(model, graph, args, eval_indices, use_neighbor_sampling, fa
     
     # Create loader if using neighbor sampling
     if use_neighbor_sampling:
-        from torch_geometric.loader import NeighborLoader
-        input_nodes = ("flight", eval_nodes)
-        
-        loader = NeighborLoader(
-            graph,
-            num_neighbors=fanouts,
-            batch_size=args.batch_size,
-            input_nodes=input_nodes,
-            shuffle=False,
-        )
+            input_nodes = ("flight", eval_nodes)
+            loader = NeighborLoader(
+                graph,
+                num_neighbors=fanouts,
+                batch_size=args.batch_size,
+                input_nodes=input_nodes,
+                shuffle=False,
+            )
     else:
         loader = None
 
@@ -75,15 +75,13 @@ def _evaluate_single(model, graph, args, eval_indices, use_neighbor_sampling, fa
     labels_cat = torch.cat(all_labels) if all_labels else torch.tensor([])
     preds_cat = torch.cat(all_preds) if all_preds else torch.tensor([])
     
-    from src.utils import compute_epoch_stats
     compute_epoch_stats(0, args, graph, labels_cat, preds_cat, [0.0], start_ts, logger)
 
 
 def _evaluate_windows(model, graph, args, window_defs, eval_indices, use_neighbor_sampling, fanouts, device, logger, start_ts):
     """Evaluate on sliding windows using induced subgraphs."""
-    from src.subgraph_builder import WindowSubgraphBuilder
     
-    print(f"Evaluating {len(window_defs)} windows using iterative subgraph builder")
+    logger.info(f"Evaluating {len(window_defs)} windows using iterative subgraph builder")
     # Use GPU-resident builder when graph is on GPU to avoid transfers
     use_gpu = graph["flight"].x.device.type == 'cuda'
     builder = WindowSubgraphBuilder(
@@ -178,7 +176,8 @@ def test(
     """
     import time
     start_ts = time.time()
-    logger = logging.getLogger("train")
+    from src.utils import get_logger
+    logger = get_logger()
     
     device = next(model.parameters()).device
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))

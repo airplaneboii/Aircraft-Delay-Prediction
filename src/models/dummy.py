@@ -37,8 +37,10 @@ class DummyModel(nn.Module):
             self.target_node_type = self.node_types[0] if self.node_types else None
         self.out_proj = Linear(hidden_channels, out_channels)
 
-        print(f"DummyModel: {len(self.node_types)} node types, {len(self.edge_types)} edge types")
-        print(f"DummyModel: Outputting predictions for '{self.target_node_type}' nodes")
+        from src.utils import get_logger
+        logger = get_logger()
+        logger.info("DummyModel: %d node types, %d edge types", len(self.node_types), len(self.edge_types))
+        logger.info("DummyModel: Outputting predictions for '%s' nodes", self.target_node_type)
 
     def forward(self, x_dict, edge_index_dict):
         # Project each node type to hidden dimension (skip unknowns defensively)

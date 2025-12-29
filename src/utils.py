@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, f1_score, recall_score, precision_score
 from torch_geometric.data import HeteroData
@@ -6,6 +7,9 @@ import logging
 from typing import Optional
 import numpy as np
 import pandas as pd
+import time
+
+"""Utility helpers for logging, graph operations, normalization, metrics, and system stats."""
 
 try:
     from torch_geometric.profile.utils import get_data_size  # available in recent PyG
@@ -28,9 +32,13 @@ def ensure_dir(
 
 ###################### SETUP LOGGING ######################
 def setup_logging(verbosity: int = 0, logfile: Optional[str] = None) -> logging.Logger:
-    """Configure root logger for the application.
+    """Configure a single named logger for the application.
 
-    verbosity: 0=WARNING, 1=INFO, 2=DEBUG
+    This avoids repeated calls to basicConfig and provides a consistent
+    `train` logger across modules. If the logger already has handlers we
+    only update its level (idempotent), which is useful for tests.
+
+    verbosity: 0=WARNING, 1=INFO (INFO logs go to stdout), 2=DEBUG
     """
     level = logging.WARNING
     if verbosity >= 2:
@@ -38,14 +46,43 @@ def setup_logging(verbosity: int = 0, logfile: Optional[str] = None) -> logging.
     elif verbosity == 1:
         level = logging.INFO
 
-    handlers = [logging.StreamHandler()]
-    if logfile:
-        handlers.append(logging.FileHandler(logfile))
+    logger = logging.getLogger("train")
 
-    logging.basicConfig(level=level,
-                        format="%(asctime)s %(levelname)s: %(message)s",
-                        datefmt="%H:%M:%S",
-                        handlers=handlers)
+    # If the logger already configured, just set the level and adjust stream handlers
+    if logger.handlers:
+        logger.setLevel(level)
+        # If user requested INFO, ensure StreamHandlers use stdout instead of stderr
+        if level == logging.INFO:
+            for h in logger.handlers:
+                if isinstance(h, logging.StreamHandler):
+                    try:
+                        if getattr(h, "stream", None) is sys.stderr:
+                            h.stream = sys.stdout
+                    except Exception:
+                        pass
+        return logger
+
+    logger.setLevel(level)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+
+    # Send INFO-level console output to stdout (instead of default stderr).
+    stream_target = sys.stdout if level == logging.INFO else None
+    stream_handler = logging.StreamHandler(stream=stream_target)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    if logfile:
+        file_handler = logging.FileHandler(logfile)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    # Prevent double logging in interactive environments
+    logger.propagate = False
+    return logger
+
+
+def get_logger() -> logging.Logger:
+    """Return the configured top-level application logger (name: 'train')."""
     return logging.getLogger("train")
 
 
@@ -178,19 +215,20 @@ def get_available_system_memory():
 
 def print_available_memory():
     """Print available GPU VRAM and system RAM."""
-    print("\nAvailable Memory:")
-    
+    logger = get_logger()
+    logger.info("Available Memory:")
+
     gpu_info = get_available_gpu_memory()
     if gpu_info:
-        print(f"  GPU VRAM:  {gpu_info['available_mb']:8.1f} MB / {gpu_info['total_mb']:.1f} MB")
+        logger.info(f"  GPU VRAM:  {gpu_info['available_mb']:8.1f} MB / {gpu_info['total_mb']:.1f} MB")
     else:
-        print(f"  GPU VRAM:  Not available (CPU mode)")
-    
+        logger.info(f"  GPU VRAM:  Not available (CPU mode)")
+
     ram_info = get_available_system_memory()
     if ram_info:
-        print(f"  System RAM: {ram_info['available_mb']:8.1f} MB / {ram_info['total_mb']:.1f} MB")
+        logger.info(f"  System RAM: {ram_info['available_mb']:8.1f} MB / {ram_info['total_mb']:.1f} MB")
     else:
-        print(f"  System RAM: Unable to query")
+        logger.info(f"  System RAM: Unable to query")
 
 
 ################ TRAINING/VALIDATION/TESTING STATS ####################
@@ -200,7 +238,6 @@ def compute_epoch_stats(epoch, args, graph, labels_cat, preds_cat, epoch_losses,
     This function performs logging adjusted for the mode (train/val/test).
     Extracts mode from args.mode for appropriate logging behavior.
     """
-    import time
     epoch_time = time.time() - epoch_start_time
     mode = args.mode
 
@@ -287,12 +324,13 @@ def print_graph_stats(data: HeteroData):
         edge_bytes = {}
         total_nodes = 0
         total_edges = 0
-        print("\n" + "="*70)
-        print(" "*27 + "GRAPH STATISTICS")
-        print("="*70)
+        logger = get_logger()
+        logger.info("\n" + "="*70)
+        logger.info(" "*27 + "GRAPH STATISTICS")
+        logger.info("="*70)
 
         # Nodes
-        print("\nNODE TYPES:")
+        logger.info("NODE TYPES:")
         node_total_bytes = 0
         for ntype in data.node_types:
             x = getattr(data[ntype], 'x', None)
@@ -310,13 +348,13 @@ def print_graph_stats(data: HeteroData):
             if isinstance(n_nodes, int):
                 total_nodes += n_nodes
             mb = node_bytes[ntype] / (1024 * 1024)
-            print(f"  {ntype:12s}: count={n_nodes:7}, shape={str(feat_shape):20s}, dtype={str(dtype):15s}, memory={mb:8.2f} MB")
+            logger.info(f"  {ntype:12s}: count={n_nodes:7}, shape={str(feat_shape):20s}, dtype={str(dtype):15s}, memory={mb:8.2f} MB")
 
-        print(f"\n  >>> TOTAL NODES: {total_nodes:,}")
-        print(f"  >>> NODE MEMORY: {node_total_bytes / (1024*1024):.2f} MB")
+        logger.info(f"\n  >>> TOTAL NODES: {total_nodes:,}")
+        logger.info(f"  >>> NODE MEMORY: {node_total_bytes / (1024*1024):.2f} MB")
 
         # Edges
-        print("\nEDGE TYPES:")
+        logger.info("\nEDGE TYPES:")
         edge_total_bytes = 0
         for etype in data.edge_types:
             eidx = getattr(data[etype], 'edge_index', None)
@@ -332,10 +370,10 @@ def print_graph_stats(data: HeteroData):
             total_edges += num_edges
             mb = edge_bytes[etype] / (1024 * 1024)
             etype_str = str(etype)[:40]
-            print(f"  {etype_str:42s}: edges={num_edges:7,}, shape={str(shape):20s}, memory={mb:8.2f} MB")
+            logger.info(f"  {etype_str:42s}: edges={num_edges:7,}, shape={str(shape):20s}, memory={mb:8.2f} MB")
 
-        print(f"\n  >>> TOTAL EDGES: {total_edges:,}")
-        print(f"  >>> EDGE MEMORY: {edge_total_bytes / (1024*1024):.2f} MB")
+        logger.info(f"\n  >>> TOTAL EDGES: {total_edges:,}")
+        logger.info(f"  >>> EDGE MEMORY: {edge_total_bytes / (1024*1024):.2f} MB")
 
         # Labels / other tensors (regression/classification stored separately)
         label_bytes = 0
@@ -346,37 +384,37 @@ def print_graph_stats(data: HeteroData):
             lb = _sizeof(y_reg)
             label_bytes += lb
             mb = lb / (1024 * 1024)
-            print(f"\nLABELS:")
-            print(f"  flight.y_reg: shape={tuple(y_reg.shape)}, dtype={y_reg.dtype}, memory={mb:.2f} MB")
+            logger.info(f"\nLABELS:")
+            logger.info(f"  flight.y_reg: shape={tuple(y_reg.shape)}, dtype={y_reg.dtype}, memory={mb:.2f} MB")
             any_label_printed = True
         if isinstance(y_cls, torch.Tensor):
             lb = _sizeof(y_cls)
             label_bytes += lb
             mb = lb / (1024 * 1024)
             if not any_label_printed:
-                print(f"\nLABELS:")
-            print(f"  flight.y_cls: shape={tuple(y_cls.shape)}, dtype={y_cls.dtype}, memory={mb:.2f} MB")
+                logger.info(f"\nLABELS:")
+            logger.info(f"  flight.y_cls: shape={tuple(y_cls.shape)}, dtype={y_cls.dtype}, memory={mb:.2f} MB")
             any_label_printed = True
         if not any_label_printed:
-            print("\nLABELS: None stored on flight nodes")
+            logger.info("LABELS: None stored on flight nodes")
 
         # Grand totals
         total_bytes = node_total_bytes + edge_total_bytes + label_bytes
-        print("\n" + "="*70)
-        print(f"TOTAL MEMORY: {total_bytes / (1024*1024):.2f} MB ({total_bytes / 1024:.1f} KB, {total_bytes} bytes)")
-        print("="*70 + "\n")
+        logger.info("\n" + "="*70)
+        logger.info(f"TOTAL MEMORY: {total_bytes / (1024*1024):.2f} MB ({total_bytes / 1024:.1f} KB, {total_bytes} bytes)")
+        logger.info("="*70 + "\n")
 
         if get_data_size is not None:
             try:
                 builtin_bytes = get_data_size(data)
                 builtin_mb = builtin_bytes / (1024 * 1024)
-                print(f"PyG get_data_size() validation: {builtin_mb:.2f} MB")
+                logger.info(f"PyG get_data_size() validation: {builtin_mb:.2f} MB")
             except Exception as inner_e:
-                print("Note: get_data_size() failed:", inner_e)
+                logger.debug("get_data_size() failed: %s", inner_e)
         else:
-            print("Note: get_data_size() not available in this PyG version.")
+            logger.info("Note: get_data_size() not available in this PyG version.")
     except Exception as e:
-        print("Warning: failed to compute graph stats:", e)
+        logger.warning("Warning: failed to compute graph stats: %s", e)
 
 
 ################ NEIGHBOR FANOUT RESOLUTION ####################
@@ -448,4 +486,3 @@ def get_labels(data, prediction_type: str, mask=None):
         if mask is not None:
             return outf[mask]
         return outf
-    

@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm, trange
 from colorama import Fore, Style, init
 from datetime import datetime, timedelta
-from data.splitter import split_file_to_list, format_list
+from src.splitter import split_file_to_list, format_list
 
 # Initialize colorama (needed on Windows)
 init(autoreset=True)

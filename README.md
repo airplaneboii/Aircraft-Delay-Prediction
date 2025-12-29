@@ -1,7 +1,9 @@
 # Aircraft Delay Prediction
 Group project for MLG course 2025.
 
-This is still work in progress.
+We are predicting flight delays using GNNs based on the data from Transtats.
+This file contains basic instructions on how to get the data, and how to train and run the models.
+To read the full medium article, visit: https://medium.com/@dv34984/45ca2d703b03
 
 ---
 
@@ -110,13 +112,44 @@ python main.py -c configs/hetero3_rgcn_cls.yaml --mode test
 ```
 
 ### Available options
-- Graph types: `base`, `hetero1`, `hetero2`, `hetero3`, `not_very_hetero`, `homo`, `hetero2nodes`
-- Model types: `dummy`, `heterosage`, `rgcn`, `leakyrgcn`, `hgt`
+- Graph types: `hetero3`, `hetero5`
+- Model types: `dummy`, `rgcn`, `hgt`
 - Neighbor sampling: `--neighbor_sampling` with `--neighbor_fanouts 15,10`
 - Classification threshold: `--border` (see configs)
 
 Logs and predictions are written to `logs/`. By default, `data_path` auto-selects the most recent file in `data/datasets/`, 
 unless a specific path is specified.
+
+## Sliding Windows Guide
+
+### Purpose
+This guide explains the sliding window setup used by the project and the recommended default configuration.
+
+### Default Parameters
+- unit: 60 (minutes per time unit)
+- learn_window: 24 (24 units = 24 hours when unit=60)
+- pred_window: 1 (one unit)
+- window_stride: 1 (slide by one unit)
+- use_sliding_windows: enabled by default
+
+### Behavior
+- Windows are generated per split (train/val/test) using absolute timestamps on flight nodes (`flight.timestamp_min`).
+- Each window contains flights whose timestamps fall into the corresponding time-unit range; windows are assigned to splits so that windows only contain flights for that split (no leakage).
+- For storage efficiency, a single full graph is built and windows are induced subgraphs over that graph; the system supports both CPU-resident and GPU-resident graphs for zero-copy subgraph extraction.
+
+### Recommendations
+- Use `learn_window=24` (24 hours) for day-level context in most experiments.
+- Use `unit=60` to express windows in minutes; change `unit` only if you want coarser/finer granularity.
+- For large graphs, prefer GPU-resident mode (set via builder `use_gpu_resident=True`) to avoid CPU↔GPU transfers when building subgraphs.
+
+### Notes
+- Sliding windows are used by default; to use the legacy approach you can disable them by setting `use_sliding_windows: false` in a YAML config or using `--use_sliding_windows false` on the CLI.
+- The window builder caches per-unit flight buckets and uses CSR adjacency + rolling refcounts for O(delta) updates between consecutive windows for best performance.
+
+### Where to look in the code
+- Window generation: `data/data_loader.py::compute_windows_from_graph()`
+- Splits computation: `data/data_loader.py::compute_splits_from_graph()`
+- Subgraph builder: `src/subgraph_builder.py::WindowSubgraphBuilder`
 
 ---
 ## Repository Structure

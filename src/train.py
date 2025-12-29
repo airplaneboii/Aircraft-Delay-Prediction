@@ -1,11 +1,12 @@
-#from asyncio import graph
 import torch
 import time
 from datetime import datetime
 from torch import nn, optim
-from src.utils import compute_epoch_stats, resolve_fanouts, get_labels, move_graph_to_device
+from src.utils import compute_epoch_stats, resolve_fanouts, get_labels, move_graph_to_device, get_logger
+
+logger = get_logger()
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.data import HeteroData
+from src.subgraph_builder import WindowSubgraphBuilder
 import logging
 import os
 import csv
@@ -21,8 +22,6 @@ OVERSAMPLE_FACTOR = 1.0
 
 def _save_checkpoint(model, optimizer, scheduler, args, epoch, model_path, logger):
     """Save model checkpoint (helper).
-
-    Keeps same dict layout as prior inline saves so resume works unchanged.
     """
     logging.debug(f"Saving checkpoint for epoch {epoch+1}/{getattr(args, 'epochs', '?')}")
     try:
@@ -39,11 +38,10 @@ def _save_checkpoint(model, optimizer, scheduler, args, epoch, model_path, logge
 
 
 def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=0, criterion=None):
-    """Train using sliding windows with induced subgraphs (hetero4)."""
-    from src.subgraph_builder import WindowSubgraphBuilder, OptimizedWindowSubgraphBuilder
+    """Train using sliding windows with induced subgraphs."""
     
-    print(f"\n=== Training with sliding windows: {len(window_defs)} windows per epoch ===")
-    print(f"Using induced subgraphs to prevent message passing over non-window flights")
+    logger.info(f"\n=== Training with sliding windows: {len(window_defs)} windows per epoch ===")
+    logger.info(f"Using induced subgraphs to prevent message passing over non-window flights")
 
     overall_start = time.time()
 
@@ -64,7 +62,7 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
         use_gpu_resident=use_gpu,
     )
     if use_gpu:
-        print(f"GPU-resident mode enabled: subgraphs built directly in GPU memory")
+        logger.info("GPU-resident mode enabled: subgraphs built directly in GPU memory")
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -164,7 +162,7 @@ def _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model
     if csv_file:
         csv_file.close()
 
-    print(f"\nTraining completed in {time.time() - overall_start:.2f}s")
+    logger.info(f"\nTraining completed in {time.time() - overall_start:.2f}s")
     return
 
 
@@ -319,9 +317,9 @@ def train(
         model: nn.Module,
         graph,
         args,
-        window_defs: list = None,  # New: list of window definitions for hetero4
+        window_defs: list = None,  # List of window definitions for sliding window training
     ) -> None:
-    print(args)
+    logger.debug(vars(args) if hasattr(args, '__dict__') else args)
     # Use args.epochs for number of epochs
     num_epochs = args.epochs
     
@@ -331,9 +329,6 @@ def train(
     # Optional learning-rate scheduler (not configured by default)
     scheduler = None
     device = next(model.parameters()).device
-
-    # y = graph["flight"].y.squeeze(-1).cpu()
-    # print("y mean/std:", y.mean().item(), y.std().item(), "min/max:", y.min().item(), y.max().item())
 
     # Define loss function
     if args.prediction_type == "regression":
@@ -352,7 +347,7 @@ def train(
         y = get_labels(graph, "classification", train_idx).view(-1)
         num_pos = (y == 1).sum().item()
         num_neg = (y == 0).sum().item()
-        print(num_pos, num_neg)
+        logger.debug(f"pos={num_pos}, neg={num_neg}")
         pos_weight = torch.tensor([num_neg / num_pos], device=device)
         #pos_weight = torch.tensor([num_neg / num_neg], device=device) # 1.0 no weighting
         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
@@ -379,7 +374,8 @@ def train(
         loader = None
 
     # Use the global logger configured by main; get local logger
-    logger = logging.getLogger("train")
+    from src.utils import get_logger
+    logger = get_logger()
 
     overall_start = time.time()
     start_dt = datetime.now()
@@ -414,9 +410,9 @@ def train(
                 if "scheduler_state_dict" in ckpt and scheduler is not None:
                     scheduler.load_state_dict(ckpt["scheduler_state_dict"])
                 args.norm_stats = ckpt.get("norm_stats", getattr(args, "norm_stats", None))
-                print(f"Resuming training from epoch {start_epoch+1}, loaded checkpoint {model_path}")
+                logger.info(f"Resuming training from epoch {start_epoch+1}, loaded checkpoint {model_path}")
         except Exception as e:
-            print(f"Warning: failed to load checkpoint {model_path}: {e}")
+            logger.warning(f"Failed to load checkpoint {model_path}: {e}")
 
     # AMP scaler (optional mixed precision)
     # Optional: AMP via torch.amp (CUDA-only)
@@ -443,9 +439,9 @@ def train(
                         # On any failure, fallback to original op to raise native errors
                         return _orig_segment_matmul(inputs, ptr, other)
                 pyg_ops.segment_matmul = _safe_segment_matmul
-                logging.getLogger("train").info("Patched pyg_lib.ops.segment_matmul to use float32 compute when inputs are float16 (AMP compatibility).")
+                logger.info("Patched pyg_lib.ops.segment_matmul to use float32 compute when inputs are float16 (AMP compatibility).")
         except Exception as e:
-            logging.getLogger("train").warning(f"Failed to patch pyg segment_matmul for AMP: {e}")
+            logger.warning(f"Failed to patch pyg segment_matmul for AMP: {e}")
 
     # Optional: compile the model for speed (PyTorch 2.x)
     if bool(getattr(args, "compile", False)):
@@ -506,11 +502,11 @@ def train(
         if not compile_attempted:
             logger.info("Continuing without torch.compile (performance will be unoptimized)")
 
-    # Hetero4 sliding window training: delegate to helper
+    # Sliding-window training
     if window_defs is not None:
         _train_windowed(model, graph, args, window_defs, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=start_epoch, criterion=criterion)
         return
     
-    # Legacy training: delegate to helper
+    # Legacy training
     _train_legacy(model, graph, args, loader, use_neighbor_sampling, fanouts, optimizer, scheduler, model_path, csv_writer, csv_file, logger, device, amp_enabled, scaler, start_epoch=start_epoch, criterion=criterion)
     return

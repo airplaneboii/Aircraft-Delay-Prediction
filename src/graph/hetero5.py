@@ -7,11 +7,11 @@ from src.utils import hhmm_to_minutes, normalize_with_idx
 
 class HeteroGraph5:
     """
-    HeteroGraph5: Combines the best of hetero3 and hetero4.
+    HeteroGraph5: Graph builder with rich embeddings for heterogeneous GNN training.
     
-    Based on hetero4 (single graph, windowed training) but with:
-    - Richer aircraft embeddings (stats from hetero3)
-    - Richer airline embeddings (stats from hetero3)
+    Features:
+    - Richer aircraft embeddings (statistical features)
+    - Richer airline embeddings (statistical features)
     - Cyclical time embeddings for flights (sin/cos for time of day, day of week, month)
     - Optimized for sliding-window temporal training
     """

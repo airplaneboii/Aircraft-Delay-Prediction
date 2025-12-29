@@ -2,35 +2,19 @@ import os
 import torch
 import numpy as np
 from src.config import get_args
-from src.graph.base import BaseGraph
-from src.graph.hetero1 import HeteroGraph1
-from src.graph.hetero2 import HeteroGraph2
-from src.graph.hetero3 import HeteroGraph3
-from src.graph.hetero4 import HeteroGraph4
-from src.graph.hetero5 import HeteroGraph5
-from src.graph.not_very_hetero import NotVeryHetero
-from src.graph.homo import HomoGraph
-from src.graph.hetero2nodes import Hetero2Nodes
 from src.models.dummy import DummyModel
-from src.models.heterosage import HeteroSAGE
-from src.models.hgt import HGT
+from src.graph.hetero3 import HeteroGraph3
+from src.graph.hetero5 import HeteroGraph5
 from src.models.rgcn import RGCN
-from src.models.leakyrgcn import LeakyRGCN
+from src.models.hgt import HGT
 from src.train import train
 from src.test import test
 from src.utils import setup_logging, ensure_dir, move_graph_to_device, print_graph_stats, print_available_memory
-from data.data_loader import load_data, compute_windows_from_graph, compute_splits_from_graph, compute_split_and_normalize
+from src.data_loader import load_data, compute_windows_from_graph, compute_splits_from_graph, compute_split_and_normalize
 
 GRAPH_BUILDERS = {
-    "base": BaseGraph,
-    "hetero1": HeteroGraph1,
-    "hetero2": HeteroGraph2,
     "hetero3": HeteroGraph3,
-    "hetero4": HeteroGraph4,
     "hetero5": HeteroGraph5,
-    "not_very_hetero": NotVeryHetero,
-    "homo": HomoGraph,
-    "hetero2nodes": Hetero2Nodes,
 }
 
 
@@ -53,12 +37,8 @@ def build_model(args, metadata, in_channels_dict):
         return None
     if mt == "dummy":
         return DummyModel(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels).to(args.device)
-    if mt == "heterosage":
-        return HeteroSAGE(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, dropout=do).to(args.device)
     if mt == "rgcn":
         return RGCN(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, dropout=do).to(args.device)
-    if mt == "leakyrgcn":
-        return LeakyRGCN(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, dropout=do).to(args.device)
     if mt == "hgt":
         return HGT(metadata=metadata, in_channels_dict=in_channels_dict, hidden_channels=hc, out_channels=out_channels, num_layers=nl, num_heads=2, dropout=do).to(args.device)
     raise ValueError("Unsupported model type.")
@@ -119,25 +99,24 @@ def main():
         graph_filename = args.load_graph if args.load_graph.endswith(".pt") else f"{args.load_graph}.pt"
         graph_path = os.path.join(args.graph_dir, graph_filename)
         if os.path.exists(graph_path):
-            print(f"Loading graph from {graph_path}...")
+            logger.info(f"Loading graph from {graph_path}...")
             graph = torch.load(graph_path, weights_only=False)
             graph_loaded = True
             # Restore norm_stats if saved with graph
             try:
                 if hasattr(graph, "norm_stats"):
                     setattr(args, "norm_stats", graph.norm_stats)
-                    print("Loaded normalization stats from graph")
+                    logger.info("Loaded normalization stats from graph")
             except Exception as e:
-                print(f"Warning: Could not restore norm_stats from graph: {e}")
+                logger.warning(f"Could not restore norm_stats from graph: {e}")
             print_graph_stats(graph)
         else:
-            print(f"Graph file not found at {graph_path}. Building from data...")
+            logger.info(f"Graph file not found at {graph_path}. Building from data...")
 
     if graph is None:
-        print(f"Loading data...")
+        logger.info("Loading data...")
         df, norm_config = load_data(
             args.data_path,
-            task_type=args.prediction_type,
             max_rows=getattr(args, "rows", None),
             normalize_cols_file=("data/normalize.txt" if getattr(args, "normalize", True) else None),
             normalize=getattr(args, "normalize", True),
@@ -152,7 +131,7 @@ def main():
         setattr(args, "norm_stats", norm_stats)
         
         # Build graph with temporary equal splits (will be overwritten)
-        print("\nBuilding graph...")
+        logger.info("Building graph...")
         temp_idx = np.arange(len(df))
         first_graph = build_graph(args, df, temp_idx, temp_idx, temp_idx, norm_stats)
         print_graph_stats(first_graph)
@@ -164,14 +143,14 @@ def main():
     
     # Always compute splits from graph (whether loaded or built)
     # This stores split boundaries (2 integers) instead of full index arrays or masks
-    print("\nComputing splits from graph...")
+    logger.info("Computing splits from graph...")
     split_info = compute_splits_from_graph(
         first_graph,
         split_ratios=tuple(x/100 for x in args.data_split),
     )
-    print(f"Split boundaries stored on graph: train=[0,{split_info['train_end']}), "
+    logger.info(f"Split boundaries stored on graph: train=[0,{split_info['train_end']}), "
           f"val=[{split_info['train_end']},{split_info['val_end']}), test=[{split_info['val_end']},{split_info['n_flights']})")
-    print("Memory-efficient: only 2 integers stored instead of full masks/indices")
+    logger.info("Memory-efficient: only 2 integers stored instead of full masks/indices")
 
     norm_stats = getattr(args, "norm_stats", None)
     n_nodes = resolve_n_nodes(first_graph, df)
@@ -186,7 +165,7 @@ def main():
             pred_window=getattr(args, "pred_window", 1),
             window_stride=getattr(args, "window_stride", 1),
         )
-        print(f"Windows generated per split: train={len(window_splits['train'])}, "
+        logger.info(f"Windows generated per split: train={len(window_splits['train'])}, "
               f"val={len(window_splits['val'])}, test={len(window_splits['test'])}")
     elif not getattr(args, "use_sliding_windows", False):
         window_splits = None
@@ -194,30 +173,29 @@ def main():
     if args.save_graph and not graph_loaded and first_graph is not None:
         graph_filename = args.save_graph if args.save_graph.endswith(".pt") else f"{args.save_graph}.pt"
         graph_path = os.path.join(args.graph_dir, graph_filename)
-        print(f"Saving graph to {graph_path}...")
+        logger.info(f"Saving graph to {graph_path}...")
         # Only persist norm_stats; windows are recomputed on load
         first_graph.norm_stats = norm_stats
         torch.save(first_graph, graph_path)
-        print("Graph saved successfully (with norm_stats).")
+        logger.info("Graph saved successfully (with norm_stats).")
     
-    #####################################################################################0
-    
+    # Proceed to device checks
 
-    print("checking for GPUs...")
+    logger.info("Checking for GPUs...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args.device = device
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
     print_available_memory()
     use_neighbor_sampling = bool(getattr(args, "neighbor_sampling", False))
 
     metadata = first_graph.metadata()  # metadata[0] are node types, metadata[1] are edge types
-    print(f"Node feature sizes: {in_channels_dict}")
+    logger.info(f"Node feature sizes: {in_channels_dict}")
 
 
     ################################## MODEL AND MODE SELECTION ################################################
 
     if args.model_type == "none":
-        print("Not using any model, this is just for testing the surrounding code and graph building")
+        logger.info("Not using any model; exiting (used for testing graph building)")
         return
     model = build_model(args, metadata, in_channels_dict)
 
@@ -235,9 +213,9 @@ def main():
         # Otherwise keep on CPU and move only subgraphs to device
         if not use_neighbor_sampling:
             if window_defs and device.type == 'cuda':
-                # GPU-resident mode: keep full graph on GPU
-                working_graph = move_graph_to_device(working_graph, device)
-                print("GPU-resident windowing: graph kept on GPU for zero-copy subgraph building")
+                    # GPU-resident mode: keep full graph on GPU
+                    working_graph = move_graph_to_device(working_graph, device)
+                    logger.info("GPU-resident windowing: graph kept on GPU for zero-copy subgraph building")
             elif not window_defs:
                 # No windows: move to device
                 working_graph = move_graph_to_device(working_graph, device)
@@ -246,22 +224,22 @@ def main():
             # No sliding windows, train on full graph
             train(model, working_graph, args, window_defs=None)
         else:
-            print(f"Preparing {len(window_defs)} training windows")
+            logger.info(f"Preparing {len(window_defs)} training windows")
             train(model, working_graph, args, window_defs=window_defs)
 
-        print(f"Saving final model to {model_path}...")
+        logger.info(f"Saving final model to {model_path}...")
         save_model_state(model, args, model_path)
         
     elif args.mode in ("test", "val"):
         # Load model for evaluation
         if os.path.exists(model_path):
-            print(f"Loading model from {model_path}...")
+            logger.info(f"Loading model from {model_path}...")
             loaded = torch.load(model_path)
             if isinstance(loaded, dict) and "model_state_dict" in loaded:
                 model.load_state_dict(loaded["model_state_dict"])
                 if "norm_stats" in loaded:
                     setattr(args, "norm_stats", loaded["norm_stats"])
-                    print("Restored normalization stats from model file.")
+                    logger.info("Restored normalization stats from model file.")
             else:
                 model.load_state_dict(loaded)
         else:
@@ -286,10 +264,10 @@ def main():
 
         if not eval_window_defs:
             # No windows, evaluate on full split
-            print(f"Evaluating on full {args.mode} split (no windows)")
+            logger.info(f"Evaluating on full {args.mode} split (no windows)")
             test(model, graph, args, window_defs=None)
         else:
-            print(f"Evaluating on {len(eval_window_defs)} {args.mode} windows")
+            logger.info(f"Evaluating on {len(eval_window_defs)} {args.mode} windows")
             test(model, graph, args, window_defs=eval_window_defs)
 
 if __name__ == "__main__":

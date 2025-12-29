@@ -7,7 +7,7 @@ import argparse
 import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
-from data.splitter import split_file_to_list
+from src.splitter import split_file_to_list
 from colorama import Fore, Style, init
 
 # Initialize colorama (needed on Windows)
