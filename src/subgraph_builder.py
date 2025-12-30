@@ -2,10 +2,6 @@
 Sliding window subgraph builders for heterogeneous graphs.
 
 Optimized for memory-efficient sorted datasets using split boundaries instead of masks.
-
-Contains:
-- WindowSubgraphBuilder: CSR-based incremental builder with GPU-resident support
-- OptimizedWindowSubgraphBuilder: Direct edge assembly without PyG's subgraph method
 """
 
 import torch
