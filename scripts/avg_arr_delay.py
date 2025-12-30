@@ -4,11 +4,17 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import argparse
+
+# Default split ratios (train, val, test)
+SPLIT_RATIOS = (0.8, 0.1, 0.1)
+# Default random seed for reproducible splits
+RANDOM_SEED = 42
 
 # Simple script to compute average ARR_DELAY for a dataset
 # Configure the variables below and run with: python scripts/avg_arr_delay.py
 
-DATA_PATH = "data/datasets/12M_20251221_221451.csv"  # path to CSV file or directory
+DATA_PATH = "data/datasets/1Y_20251221_221451.csv"  # path to CSV file or directory
 HEAD_ROWS = None  # set to an int to limit rows for quick checks, or None to read all
 IGNORE_CANCELLED = True  # if True, drop rows where CANCELLED == 1
 CLIP_NEGATIVE = True  # if True, clip negative ARR_DELAY to 0 before averaging
@@ -31,9 +37,48 @@ def load_csv(path, nrows=None):
 
 
 def main():
-    df = load_csv(DATA_PATH, nrows=HEAD_ROWS)
+    parser = argparse.ArgumentParser(
+        description="Compute ARR_DELAY stats and baselines with optional train/val/test splits"
+    )
+    parser.add_argument("--data-path", default=DATA_PATH, help="Path to CSV file or directory")
+    parser.add_argument("--head-rows", type=int, default=HEAD_ROWS, help="Limit rows read for quick checks")
+    parser.add_argument(
+        "--ignore-cancelled",
+        dest="ignore_cancelled",
+        action="store_true",
+        default=IGNORE_CANCELLED,
+        help="Ignore cancelled flights (requires CANCELLED column)",
+    )
+    parser.add_argument(
+        "--clip-negative",
+        dest="clip_negative",
+        action="store_true",
+        default=CLIP_NEGATIVE,
+        help="Clip negative ARR_DELAY to 0 before averaging",
+    )
+    parser.add_argument(
+        "--save-plot",
+        dest="save_plot",
+        action="store_true",
+        default=SAVE_PLOT,
+        help="Save distribution plot to disk",
+    )
+    parser.add_argument("--plot-path", default=PLOT_PATH, help="Path to save plot")
+    parser.add_argument(
+        "--splits",
+        nargs=3,
+        type=float,
+        default=list(SPLIT_RATIOS),
+        metavar=("TRAIN", "VAL", "TEST"),
+        help="Split ratios (fractions summing to 1 or percentages summing to 100). Default 80/10/10.",
+    )
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed for shuffling before splitting")
 
-    if IGNORE_CANCELLED and "CANCELLED" in df.columns:
+    args = parser.parse_args()
+
+    df = load_csv(args.data_path, nrows=args.head_rows)
+
+    if args.ignore_cancelled and "CANCELLED" in df.columns:
         df = df[df["CANCELLED"] == 0]
 
     if "ARR_DELAY" not in df.columns:
@@ -41,7 +86,7 @@ def main():
         return
 
     df["ARR_DELAY"] = pd.to_numeric(df["ARR_DELAY"], errors="coerce")
-    if CLIP_NEGATIVE:
+    if args.clip_negative:
         df["ARR_DELAY"] = df["ARR_DELAY"].clip(lower=0)
 
     valid = df["ARR_DELAY"].dropna()
@@ -54,12 +99,12 @@ def main():
     median = valid.median()
     std = valid.std()
 
-    print(f"ARR_DELAY stats from {DATA_PATH} (n={count}):")
+    print(f"ARR_DELAY stats from {args.data_path} (n={count}):")
     print(f"  mean   = {mean:.4f} minutes")
     print(f"  median = {median:.4f} minutes")
     print(f"  std    = {std:.4f} minutes")
 
-    # Baseline predictions: always predict the mean, and always predict zero
+    # Baseline predictions for the full set (kept for compatibility / reference)
     vals = valid.values.astype(float)
 
     # Helper metric functions
@@ -79,7 +124,7 @@ def main():
             return float("nan")
         return float(1.0 - ss_res / ss_tot)
 
-    # Mean predictor
+    # Global baseline on the entire dataset
     mean_pred = mean
     mean_preds = np.full_like(vals, fill_value=mean_pred, dtype=float)
     mse_mean = mse(vals, mean_preds)
@@ -87,14 +132,13 @@ def main():
     rmse_mean = rmse(vals, mean_preds)
     r2_mean = r2_score(vals, mean_preds)
 
-    # Zero predictor
     zero_preds = np.zeros_like(vals)
     mse_zero = mse(vals, zero_preds)
     mae_zero = mae(vals, zero_preds)
     rmse_zero = rmse(vals, zero_preds)
     r2_zero = r2_score(vals, zero_preds)
 
-    print("\nBaseline metrics:")
+    print("\nGlobal baseline metrics (computed on full data):")
     print("  Predict mean:")
     print(f"    MSE  = {mse_mean:.4f}")
     print(f"    MAE  = {mae_mean:.4f}")
@@ -124,9 +168,77 @@ def main():
     print(f"  max    = {vals.max():.4f}")
     print(f"  skew   = {skew:.4f}")
 
-    # Plot distribution and boxplot
-    if SAVE_PLOT:
-        os.makedirs(os.path.dirname(PLOT_PATH), exist_ok=True)
+    # --- Splitting into train/val/test and evaluating baselines ---
+    splits = np.array(args.splits, dtype=float)
+    if splits.sum() > 1.0 + 1e-6:
+        # allow percentages (e.g., 80 10 10) or unnormalized inputs
+        splits = splits / splits.sum()
+    else:
+        # normalize small floating rounding errors
+        splits = splits / max(splits.sum(), 1.0)
+
+    n = len(vals)
+    indices = np.arange(n)
+    rng = np.random.RandomState(args.seed)
+    rng.shuffle(indices)
+
+    train_n = int(round(splits[0] * n))
+    val_n = int(round(splits[1] * n))
+    # Ensure sensible allocation (rest goes to test)
+    if train_n < 1 and n >= 1:
+        train_n = 1
+    if val_n < 0:
+        val_n = 0
+
+    train_idx = indices[:train_n]
+    val_idx = indices[train_n: train_n + val_n]
+    test_idx = indices[train_n + val_n :]
+
+    train_vals = vals[train_idx]
+    val_vals = vals[val_idx]
+    test_vals = vals[test_idx]
+
+    print(f"\nData splits (train/val/test): {splits[0]:.3f}/{splits[1]:.3f}/{splits[2]:.3f}  n={n:,}")
+    print(f"  counts -> train={len(train_vals):,}, val={len(val_vals):,}, test={len(test_vals):,}")
+
+    # Evaluate baselines using mean computed on the training set
+    def eval_baselines(y_true, mean_pred):
+        if len(y_true) == 0:
+            return None
+        mean_preds = np.full_like(y_true, fill_value=mean_pred, dtype=float)
+        zero_preds = np.zeros_like(y_true)
+        return {
+            "mse_mean": mse(y_true, mean_preds),
+            "mae_mean": mae(y_true, mean_preds),
+            "rmse_mean": rmse(y_true, mean_preds),
+            "r2_mean": r2_score(y_true, mean_preds),
+            "mse_zero": mse(y_true, zero_preds),
+            "mae_zero": mae(y_true, zero_preds),
+            "rmse_zero": rmse(y_true, zero_preds),
+            "r2_zero": r2_score(y_true, zero_preds),
+        }
+
+    train_mean = float(train_vals.mean()) if len(train_vals) > 0 else float("nan")
+
+    for name, arr in [("train", train_vals), ("val", val_vals), ("test", test_vals)]:
+        print(f"\n{name.capitalize()} (n={len(arr):,}):")
+        if len(arr) == 0:
+            print("  (no samples)")
+            continue
+        print(f"  mean   = {arr.mean():.4f}")
+        print(f"  median = {np.median(arr):.4f}")
+        print(f"  std    = {np.std(arr, ddof=1):.4f}")
+
+        # Use train mean as predictor for val/test (and compare on train as well)
+        baseline_metrics = eval_baselines(arr, train_mean)
+        if baseline_metrics is not None:
+            print("  Baseline using train mean (predict mean / predict zero):")
+            print(f"    Predict mean: MSE={baseline_metrics['mse_mean']:.4f}, MAE={baseline_metrics['mae_mean']:.4f}, RMSE={baseline_metrics['rmse_mean']:.4f}, R2={baseline_metrics['r2_mean'] if not np.isnan(baseline_metrics['r2_mean']) else 'N/A'}")
+            print(f"    Predict zero: MSE={baseline_metrics['mse_zero']:.4f}, MAE={baseline_metrics['mae_zero']:.4f}, RMSE={baseline_metrics['rmse_zero']:.4f}, R2={baseline_metrics['r2_zero'] if not np.isnan(baseline_metrics['r2_zero']) else 'N/A'}")
+
+    # Plot distribution and boxplot (unchanged behavior)
+    if args.save_plot:
+        os.makedirs(os.path.dirname(args.plot_path), exist_ok=True)
         fig, axes = plt.subplots(
             2, 1, figsize=(8, 8), gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -242,8 +354,8 @@ def main():
 
         plt.tight_layout()
         try:
-            fig.savefig(PLOT_PATH)
-            print(f"Saved distribution plot to {PLOT_PATH}")
+            fig.savefig(args.plot_path)
+            print(f"Saved distribution plot to {args.plot_path}")
         except Exception as e:
             print(f"Failed to save plot: {e}")
         plt.close(fig)
