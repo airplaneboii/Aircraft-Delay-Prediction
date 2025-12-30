@@ -223,35 +223,6 @@ Total windows: 14 (for 24 units with learn_window=10, pred_window=1, stride=1)
 
 ---
 
-## Output & Logging
-
-### Training Progress
-
-```
-Time unit: 60 minutes
-Total time units: 8760
-Dataset spans: 2016-01-01 00:05:00 to 2016-12-31 23:59:00
-
-Generated 500 training windows
-  First window: units [0, 11], learn=12450, pred=1250
-  Last window: units [489, 500], learn=12380, pred=1245
-
-PLACEHOLDER
-```
-
-### Predictions CSV
-
-After testing, predictions are saved to `logs/{model_file}_preds.csv`:
-
-| Column | Description |
-|--------|-------------|
-| `node_id` | Flight index in dataset |
-| `true` | Actual arrival delay (minutes) |
-| `pred` | Predicted arrival delay (minutes) |
-| `error` | Absolute error (minutes) |
-
----
-
 ## Best Practices
 
 1. **Start with default parameters**: 60-minute units, 10-unit learning window, 1-unit prediction window
@@ -263,47 +234,3 @@ After testing, predictions are saved to `logs/{model_file}_preds.csv`:
 7. **Full-batch training**: More stable for heterogeneous graphs (use `neighbor_sampling: false`)
 
 ---
-
-
-## Troubleshooting
-
-### Issue: Out of Memory
-
-**Solutions**:
-- Reduce `batch_size`
-- Increase `unit` size (fewer, larger time bins)
-- Increase `window_stride` (fewer overlapping windows)
-- Use `neighbor_sampling: true` for mini-batch training
-
-### Issue: Poor Prediction Accuracy
-
-**Solutions**:
-- Increase `learn_window` (more historical context)
-- Decrease `unit` size (finer temporal resolution)
-- Tune learning rate (`lr`) and weight decay
-- Verify ARR_DELAY masking is working (check training logs)
-
-### Issue: Training Too Slow
-
-**Solutions**:
-- Increase `window_stride` (fewer windows)
-- Increase `unit` size (fewer time bins)
-- Enable `--compile` (PyTorch 2.x JIT compilation)
-- Reduce `epochs`
-
----
-
-## Summary
-
-| Aspect | Description |
-|--------|-------------|
-| **Data Split** | Chronological: train (80%) → val (10%) → test (10%) |
-| **Time Units** | Configurable bins (default 60 minutes) |
-| **Windows** | Learn window (context) + pred window (target) |
-| **Data Leakage Prevention** | ARR_DELAY masked during prediction window |
-| **Graph** | Built once from full dataset, reused with masks |
-| **Epoch** | One pass through all sliding windows |
-| **Metrics** | Automatically denormalized to original scale (minutes) |
-| **Normalization** | Per-dataset, computed on training set only |
-
-This architecture is **time-aware**, **efficient**, and **prevents data leakage**—ideal for temporal prediction tasks like flight delay forecasting.
