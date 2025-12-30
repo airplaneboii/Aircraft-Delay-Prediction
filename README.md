@@ -122,8 +122,8 @@ unless a specific path is specified.
 
 ## Sliding Windows Guide
 
-### Purpose
-This guide explains the sliding window setup used by the project and the recommended default configuration.
+This part briefly explains the sliding window setup used by the project and the recommended default configuration.
+For a more detailed look at the sliding window pipeline, see [SLIDING_WINDOW_GUIDE.md](SLIDING_WINDOW_GUIDE.md).
 
 ### Default Parameters
 - unit: 60 (minutes per time unit)
@@ -144,7 +144,8 @@ This guide explains the sliding window setup used by the project and the recomme
 
 ### Notes
 - Sliding windows are used by default; to use the legacy approach you can disable them by setting `use_sliding_windows: false` in a YAML config or using `--use_sliding_windows false` on the CLI.
-- The window builder caches per-unit flight buckets and uses CSR adjacency + rolling refcounts for O(delta) updates between consecutive windows for best performance.
+- The window builder uses CSR adjacency + rolling refcounts for incremental updates between consecutive windows for best performance.
+- Selects the nodes to be used in the window, then uses PyG's `HeteroData.subgraph()` function to create a subgraph from them.
 
 ### Where to look in the code
 - Window generation: `data/data_loader.py::compute_windows_from_graph()`
@@ -155,16 +156,16 @@ This guide explains the sliding window setup used by the project and the recomme
 ## Repository Structure
 Key directories and files:
 
-- configs/: YAML configs for main.py
-- data/: data storage (datasets/, zipped/, unzipped/, lookup/) and data loading and conversion specifications (normalize.txt, essential.txt, dtypes.yaml etc.)
-- logs/: training logs and predictions
-- pretrained/: pretrained graphs and models
-- src/: most of the code (config.py, train.py, test.py, utils.py, graph/, models/)
-- data parsing and merging: merge.py, parser.py
-- main program: main.py, 
-- environment setup: setup_env.py
-- container setup files: apptainer.def, setup_env.sh, build_apptainer.sh
-- SLURM batch jobs: hetero1.sbatch, hetero3.sbatch, run.sbatch
+- `configs/`: YAML configs for `main.py`
+- `data/`: data storage (`datasets/`, `zipped/`, `unzipped/`, `lookup/`) and data loading and conversion specifications (`normalize.txt`, `essential.txt`, `dtypes.yaml` etc.)
+- `logs/`: training logs and predictions
+- `pretrained/`: pretrained graphs and models
+- `src/`: most of the code (`config.py`, `train.py`, `test.py`, `utils.py`, `graph/`, `models/`)
+- data parsing and merging: `merge.py`, `parser.py`
+- main program: `main.py`, 
+- environment setup: `setup_env.py`
+- container setup files: `apptainer.def`, `setup_env.sh`, `build_apptainer.sh`
+- SLURM batch jobs: `hetero5.sbatch`, `hetero5_rgcn.sbatch`, `hetero5_hgt.sbatch`
 
 ---
 ## Cluster/Container Notes
