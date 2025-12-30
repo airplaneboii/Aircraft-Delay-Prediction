@@ -1,0 +1,64 @@
+# RGCN Training Configuration for 2M Dataset with Sliding Windows
+# Uses time unit-based sliding windows with learn/pred separation
+
+# ========================================
+# General
+# ========================================
+mode: train
+verbosity: 1  # 0=WARNING, 1=INFO, 2=DEBUG
+
+# ========================================
+# Data
+# ========================================
+data_path: "data/datasets/12M_20251221_221451.csv"
+data_split: [80, 10, 10]  # train/val/test split percentages
+normalize: true  # enable normalization
+use_sliding_windows: true  # use sliding window approach for temporal training
+
+# ========================================
+# Sliding Window Parameters
+# ========================================
+unit: 60  # Time unit in minutes (1 hour)
+learn_window: 24  # Learning window: 24 units (24 hours)
+pred_window: 1  # Prediction window: 1 unit (1 hour)
+window_stride: 1  # Slide by 1 unit (1 hour)
+
+# ========================================
+# Graph
+# ========================================
+graph_type: hetero5
+save_graph: hetero5_12M
+load_graph: hetero5_12M
+
+# ========================================
+# Model
+# ========================================
+model_type: rgcn
+prediction_type: regression
+model_file: "rgcn_hetero5_12m_sliding"
+hidden_channels: 64
+num_layers: 2
+dropout: 0.2
+
+# ========================================
+# Training
+# ========================================
+epochs: 50
+lr: 0.001
+weight_decay: 1e-6
+batch_size: 150000
+criterion: huber  # huber loss for regression (robust to outliers)
+
+# ========================================
+# Performance
+# ========================================
+amp: true  # disabled for stability
+compile: false  # PyTorch 2.x compilation disabled
+neighbor_sampling: false  # full-batch training
+
+# ========================================
+# Directories
+# ========================================
+log_dir: "logs/"
+model_dir: "pretrained/models/"
+graph_dir: "pretrained/graphs/"

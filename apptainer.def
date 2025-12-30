@@ -1,0 +1,46 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    Author: you
+    Project: Aircraft-Delay-Prediction
+    Base: ubuntu:24.04
+
+%files
+    setup_env.sh /app/setup_env.sh
+    main.py /app/main.py
+    src/ /app/src/
+
+%post
+    #!/bin/sh
+    set -eu
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
+        build-essential git curl ca-certificates \
+        libaio-dev libssl-dev libffi-dev \
+        && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    # Run setup_env.sh to install Python packages at build time
+    if [ -f /app/setup_env.sh ]; then
+        chmod +x /app/setup_env.sh
+        echo "Running /app/setup_env.sh to install Python packages at build time..."
+        /app/setup_env.sh
+    elif [ -f /app/setup_env.py ]; then
+        echo "setup_env.sh not found, using setup_env.py as fallback..."
+        python3 /app/setup_env.py --venv-dir /opt/venv
+    fi
+
+    echo "done"
+
+%environment
+    export LC_ALL=C
+    export PYTHONUNBUFFERED=1
+    export PYTHONDONTWRITEBYTECODE=1
+    export PIP_DISABLE_PIP_VERSION_CHECK=1
+    export PATH="/usr/local/bin:$PATH"
+    export PYTHONPATH="/app:$PYTHONPATH"
+
+%runscript
+    cd /app
+    exec python3 "$@"
