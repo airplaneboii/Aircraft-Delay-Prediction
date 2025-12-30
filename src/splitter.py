@@ -1,6 +1,7 @@
 import argparse
 import ast
 
+
 def split_file_to_list(file_path, separator=None):
     """Reads file and returns a list of values using either a provided or auto-detected separator."""
     with open(file_path, "r", encoding="utf-8") as f:
@@ -19,6 +20,7 @@ def split_file_to_list(file_path, separator=None):
     best_sep = max(candidates, key=lambda sep: content.count(sep))
     return [item.strip() for item in content.split(best_sep) if item.strip()]
 
+
 def format_list(items, style):
     """Formats a list of strings according to the selected style."""
     if style == "newline":
@@ -32,20 +34,39 @@ def format_list(items, style):
     else:
         raise ValueError("Unknown format style.")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Split or format lists from file or string input.")
-    parser.add_argument("-m", "--mode", choices=["split", "format"], required=True,
-                        help="Choose 'split' to split file contents, or 'format' to format a list.")
+    parser = argparse.ArgumentParser(
+        description="Split or format lists from file or string input."
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        choices=["split", "format"],
+        required=True,
+        help="Choose 'split' to split file contents, or 'format' to format a list.",
+    )
     parser.add_argument("-f", "--file", help="Path to input file.")
-    parser.add_argument("-s", "--separator", help="Separator to use when splitting file contents. If omitted, auto-detect.")
-    parser.add_argument("-l", "--list", help="Inline Python-style list string (e.g. \"['a','b','c']\")")
-    parser.add_argument("-F", "--format", choices=["newline", "quoted-newline-comma", "comma", "quoted-comma"],
-                        help="Output format style for list printing.")
+    parser.add_argument(
+        "-s",
+        "--separator",
+        help="Separator to use when splitting file contents. If omitted, auto-detect.",
+    )
+    parser.add_argument(
+        "-l", "--list", help="Inline Python-style list string (e.g. \"['a','b','c']\")"
+    )
+    parser.add_argument(
+        "-F",
+        "--format",
+        choices=["newline", "quoted-newline-comma", "comma", "quoted-comma"],
+        help="Output format style for list printing.",
+    )
 
     args = parser.parse_args()
 
     # Ensure logging is configured for CLI scripts (INFO -> stdout)
-    from src.utils import setup_logging, get_logger
+    from src.utils import get_logger, setup_logging
+
     setup_logging(verbosity=1)
     logger = get_logger()
 
@@ -68,7 +89,9 @@ def main():
         elif args.file:
             items = split_file_to_list(args.file)
         else:
-            logger.error("Error: Either --list or --file must be provided in format mode.")
+            logger.error(
+                "Error: Either --list or --file must be provided in format mode."
+            )
             return
 
         try:
@@ -76,6 +99,7 @@ def main():
             logger.info(formatted)
         except ValueError as e:
             logger.error("Error: %s", e)
+
 
 if __name__ == "__main__":
     main()

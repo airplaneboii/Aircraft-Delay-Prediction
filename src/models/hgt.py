@@ -1,11 +1,19 @@
-import torch
 import torch.nn as nn
-from torch_geometric.nn import HGTConv
 import torch.nn.functional as F
-from typing import Dict
+from torch_geometric.nn import HGTConv
+
 
 class HGT(nn.Module):
-    def __init__(self, metadata, in_channels_dict, hidden_channels=64, out_channels=1, num_layers=2, num_heads=2, dropout=0.2):
+    def __init__(
+        self,
+        metadata,
+        in_channels_dict,
+        hidden_channels=64,
+        out_channels=1,
+        num_layers=2,
+        num_heads=2,
+        dropout=0.2,
+    ):
         super().__init__()
         self.num_layers = num_layers
         self.metadata = metadata
@@ -21,11 +29,11 @@ class HGT(nn.Module):
                 nn.ReLU(),
                 nn.Dropout(dropout),
             )
-        
+
         # Layer normalization for each node type
-        self.norms = nn.ModuleDict({
-            nodeType: nn.LayerNorm(hidden_channels) for nodeType in self.node_types
-        })
+        self.norms = nn.ModuleDict(
+            {nodeType: nn.LayerNorm(hidden_channels) for nodeType in self.node_types}
+        )
 
         # HGT layers
         self.convs = nn.ModuleList()
@@ -59,10 +67,10 @@ class HGT(nn.Module):
                 out = out_dict.get(nodeType, None)
                 h = h_prev if out is None else h_prev + out
                 h = self.norms[nodeType](h)
-                h = F.relu(h, inplace=True)   # inplace
+                h = F.relu(h, inplace=True)  # inplace
                 h = self.dropout(h)
-                x_dict[nodeType] = h          # reuse same dict entry
-       
+                x_dict[nodeType] = h  # reuse same dict entry
+
         # Final prediction for flight nodes
         flight_out = self.flight_head(x_dict["flight"]).squeeze(-1)
         return flight_out

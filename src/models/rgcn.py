@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import RGCNConv
 import torch.nn.functional as F
+from torch_geometric.nn import RGCNConv
 
 
 class RGCN(nn.Module):
@@ -9,23 +9,35 @@ class RGCN(nn.Module):
     Relational Graph Convolutional Network (RGCN) for heterogeneous graphs.
     Uses PyG's RGCNConv which explicitly models different relation types.
     """
-    def __init__(self, metadata, in_channels_dict, hidden_channels=64, out_channels=1, num_layers=2, dropout=0.2, num_bases=None):
+
+    def __init__(
+        self,
+        metadata,
+        in_channels_dict,
+        hidden_channels=64,
+        out_channels=1,
+        num_layers=2,
+        dropout=0.2,
+        num_bases=None,
+    ):
         super().__init__()
         self.node_types, self.edge_types = metadata
         self.hidden_channels = hidden_channels
         self.out_channels = out_channels
         self.num_layers = num_layers
         self.dropout = dropout
-        
+
         # If num_bases not specified, use min(#edge_types, 3) for basis decomposition
         if num_bases is None:
             num_bases = min(len(self.edge_types), 3)
 
         # Input encoders: project variable-size node features to hidden_channels
-        self.encoders = nn.ModuleDict({
-            node_type: nn.Linear(in_channels_dict[node_type], hidden_channels)
-            for node_type in self.node_types
-        })
+        self.encoders = nn.ModuleDict(
+            {
+                node_type: nn.Linear(in_channels_dict[node_type], hidden_channels)
+                for node_type in self.node_types
+            }
+        )
 
         # RGCN layers: each layer explicitly handles relation types
         self.convs = nn.ModuleList()
@@ -34,7 +46,7 @@ class RGCN(nn.Module):
                 hidden_channels,
                 hidden_channels,
                 num_relations=len(self.edge_types),
-                num_bases=num_bases
+                num_bases=num_bases,
             )
             self.convs.append(conv)
 
@@ -44,11 +56,11 @@ class RGCN(nn.Module):
     def forward(self, x_dict, edge_index_dict):
         """
         Forward pass through RGCN.
-        
+
         Args:
             x_dict: dict of node features by type
             edge_index_dict: dict of edge indices by relation type
-        
+
         Returns:
             predictions for flight nodes
         """
@@ -61,14 +73,16 @@ class RGCN(nn.Module):
 
         if not x_dict:
             raise ValueError("RGCN received no node features to process.")
-        
+
         # Prefer model parameter device; fall back to first input tensor device, then CPU
         first_param = next(iter(self.parameters()), None)
         if first_param is not None:
             device = first_param.device
         else:
             # x_dict has at least one entry here
-            device = next(iter(x_dict.values())).device if x_dict else torch.device("cpu")
+            device = (
+                next(iter(x_dict.values())).device if x_dict else torch.device("cpu")
+            )
         dtype = next(iter(x_dict.values())).dtype
 
         # Compute node offsets and total node count
@@ -92,7 +106,7 @@ class RGCN(nn.Module):
 
         # Build edge_index and edge_type for this forward
         total_edges = 0
-        for (src_type, rel_name, dst_type) in self.edge_types:
+        for src_type, rel_name, dst_type in self.edge_types:
             key = (src_type, rel_name, dst_type)
             if key in edge_index_dict:
                 total_edges += edge_index_dict[key].size(1)
@@ -114,8 +128,8 @@ class RGCN(nn.Module):
                 e[0].add_(src_offset)
                 e[1].add_(dst_offset)
                 n = e.size(1)
-                edge_index[:, pos:pos+n] = e
-                edge_type[pos:pos+n] = rel_idx
+                edge_index[:, pos : pos + n] = e
+                edge_type[pos : pos + n] = rel_idx
                 pos += n
 
         # Pass through RGCN layers

@@ -1,25 +1,29 @@
+import os
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 # Simple script to compute average ARR_DELAY for a dataset
 # Configure the variables below and run with: python scripts/avg_arr_delay.py
 
-DATA_PATH = "data/datasets/2M_20251221_210514.csv"  # path to CSV file or directory
+DATA_PATH = "data/datasets/12M_20251221_221451.csv"  # path to CSV file or directory
 HEAD_ROWS = None  # set to an int to limit rows for quick checks, or None to read all
 IGNORE_CANCELLED = True  # if True, drop rows where CANCELLED == 1
 CLIP_NEGATIVE = True  # if True, clip negative ARR_DELAY to 0 before averaging
 SAVE_PLOT = True  # save distribution plot to disk
 PLOT_PATH = "scripts/arr_delay_distribution.png"
 
-import os
-import pandas as pd
-import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-
 
 def load_csv(path, nrows=None):
     if os.path.isdir(path):
         # pick latest CSV in directory
-        files = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith('.csv')]
+        files = [
+            os.path.join(path, f)
+            for f in os.listdir(path)
+            if f.lower().endswith(".csv")
+        ]
         if not files:
             raise FileNotFoundError(f"No CSV files found in directory: {path}")
         path = max(files, key=os.path.getmtime)
@@ -72,7 +76,7 @@ def main():
         ss_res = ((y_true - y_pred) ** 2).sum()
         ss_tot = ((y_true - y_true.mean()) ** 2).sum()
         if ss_tot == 0:
-            return float('nan')
+            return float("nan")
         return float(1.0 - ss_res / ss_tot)
 
     # Mean predictor
@@ -123,7 +127,9 @@ def main():
     # Plot distribution and boxplot
     if SAVE_PLOT:
         os.makedirs(os.path.dirname(PLOT_PATH), exist_ok=True)
-        fig, axes = plt.subplots(2, 1, figsize=(8, 8), gridspec_kw={'height_ratios': [3, 1]})
+        fig, axes = plt.subplots(
+            2, 1, figsize=(8, 8), gridspec_kw={"height_ratios": [3, 1]}
+        )
 
         # Histogram + KDE (using pandas for KDE)
         # Prepare transformed values for log1p view
@@ -147,59 +153,67 @@ def main():
 
         # Layout: left = log1p histogram+KDE, right = linear histogram + boxplot
         fig = plt.figure(figsize=(12, 6))
-        gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[3, 1], hspace=0.25, wspace=0.3)
+        gs = fig.add_gridspec(
+            2, 2, width_ratios=[1, 1], height_ratios=[3, 1], hspace=0.25, wspace=0.3
+        )
         ax_log = fig.add_subplot(gs[:, 0])
         ax_lin = fig.add_subplot(gs[0, 1])
         ax_box = fig.add_subplot(gs[1, 1])
 
         # Left: log1p histogram + KDE
-        ax_log.hist(log_vals, bins=80, density=True, alpha=0.6, color='C0')
+        ax_log.hist(log_vals, bins=80, density=True, alpha=0.6, color="C0")
         try:
-            pd.Series(log_vals).plot.kde(ax=ax_log, color='C1')
+            pd.Series(log_vals).plot.kde(ax=ax_log, color="C1")
         except Exception:
             pass
-        ax_log.axvline(np.log1p(mean), color='k', linestyle='--', label=f"mean={mean:.2f} min")
-        ax_log.axvline(np.log1p(median), color='m', linestyle=':', label=f"median={median:.2f} min")
-        ax_log.set_title('ARR_DELAY (log1p scale)')
-        ax_log.set_xlabel('log1p(ARR_DELAY)')
+        ax_log.axvline(
+            np.log1p(mean), color="k", linestyle="--", label=f"mean={mean:.2f} min"
+        )
+        ax_log.axvline(
+            np.log1p(median), color="m", linestyle=":", label=f"median={median:.2f} min"
+        )
+        ax_log.set_title("ARR_DELAY (log1p scale)")
+        ax_log.set_xlabel("log1p(ARR_DELAY)")
         ax_log.legend()
 
         # Right-top: linear histogram focused to 95th percentile region
-        ax_lin.hist(vals, bins=80, range=(0, xmax), density=False, alpha=0.6, color='C2')
+        ax_lin.hist(
+            vals, bins=80, range=(0, xmax), density=False, alpha=0.6, color="C2"
+        )
         try:
             # overlay a KDE on the truncated range by re-evaluating values within range
             in_range = vals[vals <= xmax]
             if len(in_range) > 0:
-                pd.Series(in_range).plot.kde(ax=ax_lin, color='C3')
+                pd.Series(in_range).plot.kde(ax=ax_lin, color="C3")
         except Exception:
             pass
-        ax_lin.axvline(mean, color='k', linestyle='--', label=f"mean={mean:.2f}")
-        ax_lin.axvline(0.0, color='r', linestyle=':', label="zero")
-        ax_lin.set_title(f'ARR_DELAY (0 to {int(xmax)} min, ~95% focus)')
-        ax_lin.set_xlabel('ARR_DELAY (minutes)')
+        ax_lin.axvline(mean, color="k", linestyle="--", label=f"mean={mean:.2f}")
+        ax_lin.axvline(0.0, color="r", linestyle=":", label="zero")
+        ax_lin.set_title(f"ARR_DELAY (0 to {int(xmax)} min, ~95% focus)")
+        ax_lin.set_xlabel("ARR_DELAY (minutes)")
         ax_lin.legend()
 
         # Annotate percentiles and fraction at zero
         pct_text = f"n={len(vals):,}\n0s={frac_zero*100:.1f}%\n10%={p10:.0f}\nmedian={p50:.0f}\n90%={p90:.0f}"
-        ax_lin.text(0.98, 0.95, pct_text, transform=ax_lin.transAxes, fontsize=9,
-                    verticalalignment='top', horizontalalignment='right', bbox=dict(facecolor='white', alpha=0.7))
+        ax_lin.text(
+            0.98,
+            0.95,
+            pct_text,
+            transform=ax_lin.transAxes,
+            fontsize=9,
+            verticalalignment="top",
+            horizontalalignment="right",
+            bbox=dict(facecolor="white", alpha=0.7),
+        )
 
         # Right-bottom: boxplot aligned to same x-range
         ax_box.boxplot(vals, vert=False, widths=0.6)
-        ax_box.set_xlabel('ARR_DELAY (minutes)')
+        ax_box.set_xlabel("ARR_DELAY (minutes)")
         ax_box.set_yticks([])
         try:
             ax_box.set_xlim(left=0, right=xmax)
         except Exception:
             pass
-
-        plt.tight_layout()
-        try:
-            fig.savefig(PLOT_PATH)
-            print(f"Saved distribution plot to {PLOT_PATH}")
-        except Exception as e:
-            print(f"Failed to save plot: {e}")
-        plt.close(fig)
 
         # Adjust x-axis to focus on main mass of the distribution
         try:
@@ -219,7 +233,7 @@ def main():
 
         # Boxplot (aligned to same x-range when linear)
         axes[1].boxplot(vals, vert=False, widths=0.6)
-        axes[1].set_xlabel('ARR_DELAY (minutes)')
+        axes[1].set_xlabel("ARR_DELAY (minutes)")
         axes[1].set_yticks([])
         try:
             axes[1].set_xlim(left=0, right=xmax)
